@@ -1,0 +1,135 @@
+name: event-registration
+
+x-backend: &backend
+  image: event-registration-backend:local
+  build:
+    context: ./backend
+    target: runtime
+  environment: &backend-environment
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-events}:${POSTGRES_PASSWORD:?Copy .env.example to .env}@db:5432/${POSTGRES_DB:-event_registration}
+    ORGANIZER_TOKEN: ${ORGANIZER_TOKEN:?Set ORGANIZER_TOKEN in .env}
+    SMTP_HOST: mailpit
+    SMTP_PORT: "1025"
+    SMTP_FROM: events@example.test
+
+services:
+  db:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-event_registration}
+      POSTGRES_USER: ${POSTGRES_USER:-events}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Copy .env.example to .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=4)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
+    init: true
+    stop_grace_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit@sha256:23fe39e81bde596a918000b3135c0f85dc8bb4c9ea6be274b051143f3e300387
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_IGNORE_DUPLICATE_IDS: "true"
+      MP_MAX_MESSAGES: "0"
+      MP_DISABLE_VERSION_CHECK: "true"
+      MP_SMTP_DISABLE_RDNS: "true"
+      MP_BLOCK_REMOTE_CSS_AND_FONTS: "true"
+    ports:
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025"
+    volumes:
+      - mailpit-data:/data
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  test-db:
+    profiles: ["test"]
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_DB: event_registration_test
+      POSTGRES_USER: events_test
+      POSTGRES_PASSWORD: test_database_password_local_only
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U events_test -d event_registration_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  test:
+    profiles: ["test"]
+    build:
+      context: ./backend
+      target: test
+    environment:
+      DATABASE_URL: postgresql+psycopg://events_test:test_database_password_local_only@test-db:5432/event_registration_test
+      TEST_DATABASE_URL: postgresql+psycopg://events_test:test_database_password_local_only@test-db:5432/event_registration_test
+      ORGANIZER_TOKEN: test_organizer_token_32_characters_minimum
+    command: ["sh", "-c", "alembic upgrade head && pytest && alembic check"]
+    depends_on:
+      test-db:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  mailpit-data:

@@ -1,0 +1,115 @@
+# Регистрация на мероприятия
+
+Тестовое задание, кейс №9. Стек: FastAPI, PostgreSQL, SQLAlchemy, Alembic, React, TypeScript, Docker Compose, Mailpit; для live-статистики согласован SSE.
+
+## Текущее состояние
+
+Реализован первый этап — инфраструктура и схема БД:
+
+- отдельные backend/frontend, production-сборка React и proxy `/api`;
+- PostgreSQL 17, типизированные SQLAlchemy-модели и первая обратимая Alembic-миграция;
+- `events`, `registrations`, `email_outbox`, ограничения и индексы;
+- `/api/health`: проверка соединения и соответствия БД текущей Alembic-ревизии;
+- локальный Mailpit с постоянным хранилищем и подавлением повторных Message-ID;
+- каркас единственного worker с обработкой завершения и проверкой БД;
+- unit- и PostgreSQL integration-тесты; отдельная тестовая БД;
+- зафиксированные Python/npm зависимости и digest базовых Docker-образов.
+
+Регистрация, FIFO-продвижение, чекин, отправка/повторы писем, напоминания, перенос события и SSE-поток ещё не реализованы. Таблица outbox подготовлена, но worker пока **не отправляет и не обрабатывает письма**. Страница frontend честно показывает состояние этого этапа. Наличие схемы не доказывает конкурентную бизнес-логику и однократную доставку — их проверки появятся вместе с реализацией.
+
+## Локальный запуск
+
+Нужны Git, работающий Docker Engine/Desktop и Docker Compose v2 или новее. Python и Node на компьютере не обязательны. Проверить: `docker version`, `docker compose version`. Используются Linux-контейнеры; наружу открыты только порты 8080 и 8025 на 127.0.0.1. Первый build требует интернет для загрузки пакетов и образов; после сборки окружение работает локально без аккаунтов и внешних API. Рекомендуемый стартовый ресурс Docker: 2 CPU и 2 ГБ RAM, несколько ГБ свободного диска.
+
+Из корня репозитория:
+
+```sh
+cp .env.example .env
+docker compose up --build -d
+docker compose ps
+```
+
+Если `.env` уже существует, сохраните его вместо повторного копирования. В `.env` замените локальные примерные `POSTGRES_PASSWORD` и `ORGANIZER_TOKEN` (минимум 32 символа). Для текущей сборки DATABASE_URL из Compose используйте в пароле URI-safe символы: латинские буквы, цифры, `-`, `_`. Сложные URL-пароли потребуют отдельного URL-encoding; `.env` не коммитится. Эти ключи предназначены для локальной разработки, не для публикации сервиса.
+
+Compose ждёт готовности PostgreSQL, запускает `alembic upgrade head`, затем API и worker; frontend ждёт health API. Таблицы вручную создавать не нужно. Успешное завершение `migrate` с кодом 0 — штатное поведение одноразового контейнера.
+
+- Приложение: [http://localhost:8080](http://localhost:8080).
+- Health: [http://localhost:8080/api/health](http://localhost:8080/api/health).
+- OpenAPI JSON: [http://localhost:8080/api/openapi.json](http://localhost:8080/api/openapi.json). Внешние CDN для документации не используются.
+- Почта: [http://localhost:8025](http://localhost:8025); SMTP внутри Compose — `mailpit:1025`, отправитель `events@example.test`.
+
+Порты можно изменить через `FRONTEND_PORT`, `MAILPIT_PORT` и `POSTGRES_PORT` в `.env`. PostgreSQL доступен локально на `127.0.0.1:5433` по умолчанию; межконтейнерный адрес остаётся `db:5432`. Дополнительные настройки API/worker перечислены в `backend/app/config.py`, передаются через environment сервиса; секрет организатора не встраивается во frontend.
+
+Успешный health:
+
+```json
+{"status":"ok","database":"ready"}
+```
+
+При недоступной БД или неверной ревизии возвращаются HTTP 503 и нейтральная диагностика без DSN/пароля. Это готовность API/схемы, а не подтверждение реализации регистрации и доставки писем.
+
+Логи и управление:
+
+```sh
+docker compose logs --tail=100 api migrate worker mailpit
+docker compose restart api worker
+docker compose down
+```
+
+`down` сохраняет PostgreSQL и Mailpit volumes. `docker compose down -v` удаляет данные этого проекта; используйте только для намеренного полного сброса. Смена пароля `.env` не меняет пароль уже созданного PostgreSQL-пользователя автоматически.
+
+## Тесты и проверки
+
+Основной вариант — полностью в Docker:
+
+```sh
+docker compose --profile test build test
+docker compose --profile test run --rm test
+docker compose --profile test run --rm --no-deps test ruff check .
+docker compose --profile test run --rm --no-deps test ruff format --check .
+docker compose --profile test run --rm --no-deps test mypy app
+```
+
+`test` поднимает отдельный `test-db`, применяет миграцию, выполняет Pytest и `alembic check`. Используется PostgreSQL, не SQLite. Тестовая БД не имеет опубликованного порта, хранится в tmpfs и не использует volume приложения. В тестах round-trip миграции выполняется downgrade/upgrade **только в БД с именем, заканчивающимся на `_test`**; не задавайте TEST_DATABASE_URL основной БД.
+
+Проверяются конфигурация/секреты, ответы health, миграции вверх/вниз и соответствие моделям, типизированные даты, уникальность event/email и FIFO-позиции, недопустимые состояния регистрации, уникальность outbox и совместный rollback регистрации/задания. Конкурентное распределение мест пока не проверяется, поскольку соответствующего сервиса ещё нет.
+
+После тестов можно остановить только тестовую БД:
+
+```sh
+docker compose --profile test stop test-db
+```
+
+Для разработки вне Docker: Python 3.12+, виртуальное окружение и `pip install -r backend/requirements-dev.lock`; для frontend — Node 24, `npm ci` и `npm run build` в `frontend`. Локальный API запускается из `backend` командой `uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000` после настройки DATABASE_URL/ORGANIZER_TOKEN и миграции. `npm run dev` проксирует `/api` на этот локальный API. Без TEST_DATABASE_URL PostgreSQL integration-тесты пропускаются; такой запуск не является полной проверкой этапа.
+
+## GitHub Actions CI
+
+Workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) запускается на push в `main` и Pull Request с целевой веткой `main`. Один job на `ubuntu-24.04` выполняет:
+
+1. Валидацию Compose и сборку backend/test из существующих Dockerfile и lock-файлов.
+2. Ruff (включая форматирование), Mypy и весь Pytest без исключения интеграционных тестов.
+3. Миграции Alembic на настоящем PostgreSQL: upgrade, тест downgrade/upgrade и `alembic check`.
+4. Сборку frontend: Dockerfile запускает `npm ci` и `npm run build`, который включает TypeScript typecheck и Vite.
+5. Запуск приложения с новой БД/volumes и проверку точного JSON `/api/health` через frontend proxy.
+
+Используется отдельный Compose-проект `event-registration-ci` и `.env.example`; настоящие секреты и дополнительные сервисы GitHub не нужны. Все три опубликованных порта устанавливаются в `0`, Docker выбирает свободные; адрес frontend берётся через `docker compose port`. Это позволяет выполнять те же команды рядом с обычным локальным приложением. Worker/Redis/Celery дополнительно не вводятся.
+
+При ошибке выводятся состояния контейнеров и последние логи. Очистка CI-проекта с его volumes выполняется всегда; ошибка проверки не превращается в успешный результат. Checkout закреплён SHA, разрешения токена ограничены чтением репозитория, сохранение credentials отключено.
+
+Локально те же проверки можно выполнить, установив переменные из `jobs.checks.env` workflow и последовательно выполнив его `run`-шаги. Для завершения используйте `docker compose down --volumes --remove-orphans` **при тех же CI-переменных**, чтобы удалить только CI-окружение. Настоящий запуск на GitHub подтверждается после публикации workflow; локальный прогон не является запуском GitHub Actions.
+
+## Структура и дальнейшие шаги
+
+`backend/app/api` содержит HTTP, `services` — границу будущих бизнес-операций, `db` — SQLAlchemy и соединения, `notifications` — будущую постановку/подготовку/отправку. Доменные операции не будут вызывать SMTP или зависеть от способа выбора заданий worker. Пустой исходный `main.py` в корне не используется; точка входа API находится в `backend/app/main.py`.
+
+Далее: регистрация и FIFO под event-lock с конкурентными тестами; чекин; отправка outbox с проверками сбоя после SMTP accept; напоминания/перенос; пользовательские экраны и SSE; финальная проверка, описание улучшений и отдельное ESSAY.md из 10 предложений. Обязательные пункты PDF сохранены в REQUIREMENTS.md.
+
+Сейчас разрешён ровно один worker. Для будущего роста предусмотрен [план конкурентной обработки](docs/WORKER_EVOLUTION.md): `FOR UPDATE SKIP LOCKED`, leases и идемпотентность добавляются в выбор/завершение outbox-задач. Регистрация и FIFO при этом остаются в прежних транзакциях. Эти механизмы, Redis и Celery сейчас не реализованы.
+
+## Решения, происхождение и AI
+
+Архитектура и причины выбора: [ARCHITECTURE.md](ARCHITECTURE.md), [DECISIONS.md](DECISIONS.md). Реальный ход работы с метками Asia/Almaty: [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md). Проверяемые требования: [REQUIREMENTS.md](REQUIREMENTS.md).
+
+Код и документы подготовлены совместно с AI-агентом в Codex desktop; пользователь выбирает стек, принимает архитектуру и проверяет этапы. В доступном системном описании агент основан на GPT-6, точное имя обслуживающей версии не подтверждено; перед сдачей его необходимо сверить с настройкой сессии. Выбор среды обусловлен совместной работой с локальными файлами, терминалом и проверками; сравнительный эксперимент моделей не выполнялся.
+
+Чужое приложение за основу не использовалось. Каркас написан вручную агентом, без генератора Vite/FastAPI; используются стандартные библиотеки из manifests и стандартный шаблон Alembic для дальнейших миграций. Публичная публикация/ссылка GitHub, итоговое эссе и окончательная приёмка всего кейса относятся к последующим этапам.

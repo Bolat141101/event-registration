@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Backend, PostgreSQL, frontend and Compose
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      COMPOSE_PROJECT_NAME: event-registration-ci
+      COMPOSE_ENV_FILES: .env.example
+      COMPOSE_PROFILES: test
+      POSTGRES_PORT: "0"
+      FRONTEND_PORT: "0"
+      MAILPIT_PORT: "0"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build backend and test images
+        run: docker compose build api test
+
+      - name: Ruff
+        run: |
+          docker compose run --rm --no-deps test ruff check .
+          docker compose run --rm --no-deps test ruff format --check .
+
+      - name: Mypy
+        run: docker compose run --rm --no-deps test mypy app
+
+      - name: Alembic migrations and full Pytest suite on PostgreSQL
+        run: docker compose run --rm test
+
+      - name: TypeScript and Vite production build
+        run: docker compose build frontend
+
+      - name: Start Compose services and apply application migrations
+        run: docker compose up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend
+
+      - name: Verify API health through frontend proxy
+        run: |
+          address=$(docker compose port frontend 80)
+          curl --fail --silent --show-error --retry 5 --retry-connrefused \
+            --retry-delay 2 --max-time 10 "http://${address}/api/health" \
+            | python3 -c 'import json, sys; body = json.load(sys.stdin); assert body == {"status": "ok", "database": "ready"}, body; print(body)'
+
+      - name: Show Compose diagnostics on failure
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail=100
+
+      - name: Remove CI containers and volumes
+        if: always()
+        run: docker compose down --volumes --remove-orphans
