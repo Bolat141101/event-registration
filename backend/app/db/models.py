@@ -14,11 +14,10 @@ from sqlalchemy import (
     MetaData,
     Text,
     UniqueConstraint,
-    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
 
 
 class Base(DeclarativeBase):
@@ -57,43 +56,34 @@ class Event(Base):
     __tablename__ = "events"
     __table_args__ = (
         CheckConstraint("capacity > 0", name="positive_capacity"),
-        CheckConstraint("next_waitlist_seq >= 0", name="nonnegative_waitlist_seq"),
         CheckConstraint("schedule_version > 0", name="positive_schedule_version"),
-        CheckConstraint("length(btrim(title)) > 0", name="nonempty_title"),
         CheckConstraint("length(btrim(description)) > 0", name="nonempty_description"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
-    title: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     capacity: Mapped[int] = mapped_column(Integer)
-    next_waitlist_seq: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     schedule_version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
 
 
 class Registration(Base):
     __tablename__ = "registrations"
     __table_args__ = (
-        UniqueConstraint("event_id", "email_normalized", name="uq_registrations_event_email"),
+        UniqueConstraint("event_id", "email", name="uq_registrations_event_email"),
         UniqueConstraint("event_id", "waitlist_seq", name="uq_registrations_event_waitlist_seq"),
         CheckConstraint("status IN ('confirmed', 'waitlisted', 'cancelled')", name="valid_status"),
         CheckConstraint("participation_no > 0", name="positive_participation_no"),
         CheckConstraint(
-            "email_normalized = lower(btrim(email)) AND email_normalized <> ''",
+            "email = lower(btrim(email)) AND email <> ''",
             name="normalized_email",
         ),
         CheckConstraint(
-            "(status = 'confirmed' AND ticket_code IS NOT NULL AND waitlist_seq IS NULL "
-            "AND cancelled_at IS NULL) OR "
+            "(status = 'confirmed' AND ticket_code IS NOT NULL AND waitlist_seq IS NULL) OR "
             "(status = 'waitlisted' AND waitlist_seq IS NOT NULL AND waitlist_seq > 0 "
             "AND ticket_code IS NULL "
-            "AND checked_in_at IS NULL AND cancelled_at IS NULL) OR "
-            "(status = 'cancelled' AND cancelled_at IS NOT NULL AND ticket_code IS NULL "
+            "AND checked_in_at IS NULL) OR "
+            "(status = 'cancelled' AND ticket_code IS NULL "
             "AND waitlist_seq IS NULL AND checked_in_at IS NULL)",
             name="consistent_state",
         ),
@@ -111,7 +101,6 @@ class Registration(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
     event_id: Mapped[UUID] = mapped_column(ForeignKey("events.id", ondelete="RESTRICT"))
     email: Mapped[str] = mapped_column(Text)
-    email_normalized: Mapped[str] = mapped_column(Text)
     status: Mapped[RegistrationStatus] = mapped_column(
         Enum(
             RegistrationStatus,
@@ -126,11 +115,10 @@ class Registration(Base):
     ticket_code: Mapped[str | None] = mapped_column(Text, unique=True)
     manage_token_hash: Mapped[str] = mapped_column(Text, unique=True)
     checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
+
+    @validates("email")
+    def normalize_email(self, _key: str, value: str) -> str:
+        return value.strip().lower()
 
 
 class EmailOutbox(Base):
@@ -146,8 +134,7 @@ class EmailOutbox(Base):
         CheckConstraint("length(dedup_key) > 0", name="nonempty_dedup_key"),
         CheckConstraint("jsonb_typeof(payload) = 'object'", name="object_payload"),
         CheckConstraint(
-            "(status = 'sent' AND sent_at IS NOT NULL AND prepared_at IS NOT NULL) OR "
-            "(status <> 'sent' AND sent_at IS NULL)",
+            "status <> 'sent' OR prepared_at IS NOT NULL",
             name="consistent_delivery_state",
         ),
         Index(
@@ -186,6 +173,4 @@ class EmailOutbox(Base):
         server_default=text("'pending'"),
     )
     attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

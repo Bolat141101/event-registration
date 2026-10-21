@@ -37,11 +37,11 @@
 - Поиск не нашёл применимых AGENTS.md в workspace и проверенных родительских каталогах.
 - Исходный PDF, пустой main.py и индекс Git сохранены. Команды git add/commit/push не выполнялись; приложение, Compose, миграции и тесты не создавались.
 
-## Текущее состояние
+## Состояние после CI-этапа (историческая запись)
 
 Этап: настройка GitHub Actions CI для уже существующего инфраструктурного каркаса. Добавлен workflow, проверки локально выполнены. Backend/frontend, миграции, Mailpit, README и базовые тесты присутствуют; бизнес-функции регистрации/FIFO/чекина/доставки/SSE ещё не реализованы. Исторические записи выше описывают состояние на момент их создания. HEAD ecc4273 сохранён; агент не создавал коммитов и не выполнял push. Запуск CI на GitHub пока не подтверждён.
 
-Следующее действие — показать результаты текущего CI-этапа и дождаться подтверждения пользователя. Git push и переход к следующему этапу запрещены его текущим указанием.
+Следующим действием на момент CI-этапа было показать результаты и дождаться подтверждения пользователя. Запрет push на этом этапе сохранён; позднее пользователь отдельно разрешил упрощение схемы, см. новые записи ниже.
 
 ## Проверка CI от 2026-10-20
 
@@ -54,3 +54,61 @@
 | 2026-10-20T15:13:09+05:00 | Actionlint 1.7.12 завершился без ошибок; проверены фильтры/permissions и bash-синтаксис всех run-блоков; начат локальный запуск точных команд/environment workflow | YAML прочитан стандартным Ruby Psych после обнаружения отсутствия PyYAML; зависимости приложения не менялись. Скрипт воспроизведения создан только в /tmp |
 | 2026-10-20T15:14:14+05:00 | Полный локальный CI-прогон завершился кодом 0; проверена поддержка Linux amd64 закреплёнными Docker digest | Ruff/format и Mypy прошли; 30 tests passed за 0.54s; Alembic round-trip и check прошли; frontend image собран; Compose поднялся с новыми volumes; health вернул точный ожидаемый JSON. Все контейнеры/volumes CI-проекта удалены |
 | 2026-10-20T15:15:40+05:00 | README и журнал решений обновлены; выполнена итоговая проверка diff/Git и изоляции окружений | `git diff --check` прошёл, HEAD ecc4273 и индекс неизменны. CI-контейнеров/volumes нет, обычные сервисы работают и health даёт 200. Git push и запуск GitHub Actions не выполнялись; следующий этап не начат |
+
+## Упрощение схемы до 24 колонок — 2026-10-21
+
+Метки текущего этапа получены по UTC-часам и переведены в Asia/Almaty (`+05:00`). Это новые записи фактических действий, без восстановления пропущенной истории.
+
+| Время Алматы | Фактически выполнено | Результат |
+|---|---|---|
+| 2026-10-21T21:23:51+05:00 | Начата проверка файлов, зависимостей, истории Git и области реализации | HEAD eb34b8c, исходное дерево чистое. Реализованы инфраструктура и health, бизнес-сервисы отсутствуют |
+| 2026-10-21T21:26:32+05:00 | Проверены работающие Compose-сервисы и число записей в трёх таблицах | Все прикладные таблицы пусты; обычные сервисы работают. Схема до изменения содержит 34 поля |
+| 2026-10-21T21:31:06+05:00 | К этой отметке изменены модели, добавлены 0002 и helper очереди; расширены тесты; пройдены локальные Ruff/format/Mypy; начата сборка контейнеров | Модели 5+9+10. Первоначальные замечания Ruff по длине строк и вложенным with исправлены, проверки повторены успешно. 0001 не редактировалась; подготовлены проверки сохранности данных и конкурентного MAX |
+| 2026-10-21T21:31:30+05:00 | Обновлены ARCHITECTURE/REQUIREMENTS/README; запущен полный PostgreSQL Pytest и frontend build без кэша; сохранён pre-upgrade дамп | Дамп /tmp/MadDevs-before-0002-20261021.dump вне Git. Результаты ещё выполняющихся проверок на этой отметке не объявлены успешными |
+| 2026-10-21T21:32:46+05:00 | К этой отметке получены результаты PostgreSQL Pytest, новой миграции и frontend build; начаты запуск основного окружения и контейнерные проверки | 43 passed, 0 skipped; npm run build выполнял tsc --noEmit и Vite без кэша. Ruff/format контейнера прошли; Mypy на этой отметке ещё выполнялся |
+| 2026-10-21T21:34:07+05:00 | Получены результаты Mypy, запуска Compose, SQL-подсчёта и HTTP smoke; выполнен check основной БД | Mypy: 13 файлов без ошибок; db/api/frontend/Mailpit healthy, worker запущен, migrate exit 0; схема 0002, 5+9+10=24; health/OpenAPI/frontend HTTP 200, JSON health ok/ready; основная БД соответствует моделям |
+| 2026-10-21T21:35:28+05:00 | Завершён отдельный CLI Alembic downgrade base → upgrade head → check на выделенной тестовой БД; проверены diff, логи и отсутствие изменений 0001 | Все команды exit 0, check: No new upgrade operations detected. Populated downgrade отдельно проверен тестом: явный отказ без частичных DDL-изменений. Неисправленных ошибок проверок нет |
+
+### Выполненные команды и результаты этого этапа
+
+Все команды из корня репозитория, кроме локальных Ruff/Mypy (`backend/`). Полный Pytest выполнялся внутри test-контейнера с TEST_DATABASE_URL на настоящем PostgreSQL 17; интеграционные проверки не пропускались.
+
+| Проверка | Реально выполненная команда | Результат |
+|---|---|---|
+| Ruff lint | `docker compose --profile test run --rm --no-deps test ruff check .` | PASS |
+| Ruff format | `docker compose --profile test run --rm --no-deps test ruff format --check .` | PASS, 22 файла |
+| Mypy | `docker compose --profile test run --rm --no-deps test mypy app` | PASS, 13 файлов |
+| Pytest + upgrade/check | `docker compose --profile test run --rm --build test` | PASS, 43 tests за 1.45s (35 integration + 8 unit), без skip/xfail; сервисная команда: `alembic upgrade head && pytest && alembic check` |
+| Alembic CLI downgrade | `docker compose --profile test run --rm --no-deps test alembic downgrade base` | PASS на пустой тестовой БД, обе ревизии сняты |
+| Alembic CLI upgrade | `docker compose --profile test run --rm --no-deps test alembic upgrade head` | PASS с base до 0002 |
+| Alembic CLI check | `docker compose --profile test run --rm --no-deps test alembic check` | PASS, No new upgrade operations detected |
+| Alembic основной БД | `docker compose exec -T api alembic check` | PASS |
+| Compose config | `docker compose config --quiet` | PASS |
+| Сборка образов | `docker compose --profile test build api test frontend` | PASS |
+| TypeScript/Vite | `docker compose build --no-cache frontend` | PASS, фактически выполнены npm ci и npm run build → tsc --noEmit + vite build |
+| Полный запуск | `docker compose up --build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend` | PASS, миграция exit 0, доступные healthchecks зелёные; worker только probe, собственного healthcheck нет |
+| Health HTTP | `curl --fail --silent --show-error --max-time 10 --write-out '\nHTTP %{http_code}\n' http://127.0.0.1:8080/api/health` | PASS, 200, {"status":"ok","database":"ready"} |
+| OpenAPI HTTP | `curl --fail --silent --show-error --max-time 10 --output /tmp/MadDevs-schema-openapi.json --write-out 'OpenAPI HTTP %{http_code}\n' http://127.0.0.1:8080/api/openapi.json` | PASS, 200; JSON дополнительно проверен Python: единственный бизнес-маршрут пока GET /api/health |
+| Frontend HTTP | `curl --fail --silent --show-error --max-time 10 --output /tmp/MadDevs-schema-index.html --write-out 'Frontend HTTP %{http_code}\n' http://127.0.0.1:8080/` | PASS, 200, проверено название в HTML |
+
+SQL выполнен через `docker compose exec -T db` → psql в основной БД:
+
+```sql
+SELECT COALESCE(table_name, 'TOTAL') AS table_name, count(*) AS columns
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name IN ('events', 'registrations', 'email_outbox')
+GROUP BY ROLLUP(table_name)
+ORDER BY table_name;
+-- TOTAL=24, email_outbox=10, events=5, registrations=9
+SELECT version_num FROM alembic_version;
+-- 0002_simplify_schema
+```
+
+Тесты очереди проверяют ожидание реального event-lock через pg_blocking_pids и чтение MAX после чужого commit, FIFO-сортировку, повторное использование хвоста/пустой очереди и rollback. Тесты схемы проверяют нормализацию/повтор email, cancelled без даты, совместимость хранения нового участия, уникальность билета, допустимость checked_in_at только у confirmed, уникальность логического outbox и sent только после подготовки. Миграционный тест сохраняет данные всех трёх статусов, токен/билет/чекин, обе версии и подготовленный payload/ID/dedup_key/attempts/ошибку.
+
+Это не тесты отсутствующих HTTP-сервисов или доставки SMTP: последнее место, автоматическое продвижение при отмене, авторизованный resume, однократный чекин, реальные email/напоминания/переносы и SSE ещё не реализованы. Их дальнейшая разработка и приёмка остаются отдельными этапами. GitHub CI удалённо не запускался; commit/push не выполнялись.
+
+### Состояние после этого этапа
+
+Контрольная отметка: `2026-10-21T21:36:40+05:00`. В основной PostgreSQL проверены все имена/nullable колонок: events=5, registrations=9, email_outbox=10. Схема соответствует варианту 3. Доступны обновлённые Compose-сервисы, health/OpenAPI/frontend, ORM-нормализация и транзакционная функция номера очереди; полнофункциональная регистрация и обработка outbox ещё впереди. Тестовая БД после проверок остановлена, основные volumes сохранены. `git diff --check` и проверка пустого staged diff прошли; HEAD eb34b8c сохранён, 0001 неизменна. Добавлены три новых пока untracked файла: waitlist.py, 0002_simplify_schema.py, test_waitlist.py; обычный `git diff --stat` их не учитывает. Ошибок в выполненных проверках не осталось. Следующий этап не начат; commit/push не выполнены. После отчёта ожидается решение пользователя.
