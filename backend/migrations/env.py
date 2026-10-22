@@ -1,5 +1,8 @@
+import asyncio
+
 from alembic import context
-from sqlalchemy import create_engine, pool
+from sqlalchemy import Connection, pool
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import Settings
 from app.db.models import Base
@@ -20,23 +23,28 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def run_migrations_online() -> None:
-    engine = create_engine(str(Settings().database_url), poolclass=pool.NullPool)
+def configure_migrations(connection: Connection) -> None:
+    # Alembic exposes a synchronous migration API; run_sync adapts its I/O to asyncpg.
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        compare_server_default=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_migrations_online() -> None:
+    engine = create_async_engine(str(Settings().database_url), poolclass=pool.NullPool)
     try:
-        with engine.connect() as connection:
-            context.configure(
-                connection=connection,
-                target_metadata=target_metadata,
-                compare_type=True,
-                compare_server_default=True,
-            )
-            with context.begin_transaction():
-                context.run_migrations()
+        async with engine.connect() as connection:
+            await connection.run_sync(configure_migrations)
     finally:
-        engine.dispose()
+        await engine.dispose()
 
 
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    run_migrations_online()
+    asyncio.run(run_migrations_online())

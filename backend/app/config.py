@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     @field_validator("database_url")
     @classmethod
-    def require_psycopg(cls, value: PostgresDsn) -> PostgresDsn:
-        if value.scheme != "postgresql+psycopg":
-            raise ValueError("DATABASE_URL must use postgresql+psycopg")
+    def require_asyncpg(cls, value: PostgresDsn) -> PostgresDsn:
+        if value.scheme != "postgresql+asyncpg":
+            raise ValueError("DATABASE_URL must use postgresql+asyncpg")
         return value

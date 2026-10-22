@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     EmailOutbox,
@@ -28,15 +28,15 @@ def context(entry: Registration, event: Event) -> dict[str, Any]:
     }
 
 
-def enqueue(
-    session: Session,
+async def enqueue(
+    session: AsyncSession,
     entry: Registration,
     kind: NotificationKind,
     key: str,
     payload: dict[str, Any],
     available_at: datetime,
 ) -> EmailOutbox:
-    message = session.scalar(select(EmailOutbox).where(EmailOutbox.dedup_key == key))
+    message = await session.scalar(select(EmailOutbox).where(EmailOutbox.dedup_key == key))
     if message is None:
         message = EmailOutbox(
             registration_id=entry.id,
@@ -51,8 +51,8 @@ def enqueue(
     return message
 
 
-def queue_participation_notice(
-    session: Session,
+async def queue_participation_notice(
+    session: AsyncSession,
     entry: Registration,
     event: Event,
     now: datetime,
@@ -62,13 +62,17 @@ def queue_participation_notice(
     payload = context(entry, event)
     if initial_token is not None:
         payload["manage_path"] = f"/registration#token={initial_token}"
-    enqueue(session, entry, kind, f"{kind.value}:{entry.id}:{entry.participation_no}", payload, now)
+    await enqueue(
+        session, entry, kind, f"{kind.value}:{entry.id}:{entry.participation_no}", payload, now
+    )
 
 
-def sync_reminder(session: Session, entry: Registration, event: Event, now: datetime) -> None:
+async def sync_reminder(
+    session: AsyncSession, entry: Registration, event: Event, now: datetime
+) -> None:
     deadline = max(now, event.starts_at - timedelta(hours=24))
     payload = context(entry, event)
-    message = enqueue(
+    message = await enqueue(
         session, entry, NotificationKind.REMINDER, f"reminder:{entry.id}", payload, deadline
     )
     if message.prepared_at is None:
@@ -78,8 +82,10 @@ def sync_reminder(session: Session, entry: Registration, event: Event, now: date
             message.status = OutboxStatus.PENDING
 
 
-def refresh_unprepared_notices(session: Session, entry: Registration, event: Event) -> None:
-    messages = session.scalars(
+async def refresh_unprepared_notices(
+    session: AsyncSession, entry: Registration, event: Event
+) -> None:
+    messages = await session.scalars(
         select(EmailOutbox).where(
             EmailOutbox.registration_id == entry.id,
             EmailOutbox.prepared_at.is_(None),
@@ -101,8 +107,8 @@ def refresh_unprepared_notices(session: Session, entry: Registration, event: Eve
         message.payload = payload
 
 
-def cancel_unprepared(session: Session, entry: Registration) -> None:
-    for message in session.scalars(
+async def cancel_unprepared(session: AsyncSession, entry: Registration) -> None:
+    for message in await session.scalars(
         select(EmailOutbox).where(
             EmailOutbox.registration_id == entry.id, EmailOutbox.prepared_at.is_(None)
         )
@@ -110,16 +116,16 @@ def cancel_unprepared(session: Session, entry: Registration) -> None:
         message.status = OutboxStatus.CANCELLED
 
 
-def queue_reschedule(
-    session: Session, entry: Registration, event: Event, old_starts_at: datetime, now: datetime
+async def queue_reschedule(
+    session: AsyncSession, entry: Registration, event: Event, old_starts_at: datetime, now: datetime
 ) -> None:
-    refresh_unprepared_notices(session, entry, event)
-    sync_reminder(session, entry, event, now)
+    await refresh_unprepared_notices(session, entry, event)
+    await sync_reminder(session, entry, event, now)
     payload = context(entry, event)
     payload.update(
         old_starts_at=old_starts_at.isoformat(), new_starts_at=event.starts_at.isoformat()
     )
-    enqueue(
+    await enqueue(
         session,
         entry,
         NotificationKind.RESCHEDULED,

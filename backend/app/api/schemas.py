@@ -42,6 +42,13 @@ class ParticipationChange(InputModel):
 class CheckIn(InputModel):
     ticket_code: str = Field(min_length=1, max_length=256)
 
+    @field_validator("ticket_code")
+    @classmethod
+    def no_null_character(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("Код билета не должен содержать нулевой символ")
+        return value
+
 
 class RegistrationAccepted(BaseModel):
     message: str = "Если регистрация создана, сведения придут на почту"

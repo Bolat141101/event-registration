@@ -1,15 +1,15 @@
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
 import pytest
-from sqlalchemy import Engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.integration.business_support import Business
 
 
 @pytest.fixture
-def business(integration_engine: Engine) -> Iterator[Business]:
+async def business(integration_engine: AsyncEngine) -> AsyncIterator[Business]:
     item = Business(integration_engine)
     try:
         yield item
     finally:
-        item.cleanup()
+        await item.cleanup()

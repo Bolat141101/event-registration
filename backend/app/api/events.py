@@ -12,39 +12,43 @@ organizer = [Depends(organizer_access)]
 
 
 @router.get("")
-def list_events(session: DatabaseSession) -> list[EventView]:
-    return events.list_events(session)
+async def list_events(session: DatabaseSession) -> list[EventView]:
+    return await events.list_events(session)
 
 
 @router.get("/{event_id}")
-def get_event(event_id: UUID, session: DatabaseSession) -> EventView:
-    return events.get_event(session, event_id)
+async def get_event(event_id: UUID, session: DatabaseSession) -> EventView:
+    return await events.get_event(session, event_id)
 
 
 @router.post("", status_code=201, dependencies=organizer)
-def create_event(body: CreateEvent, session: DatabaseSession, clock: RequestClock) -> EventView:
-    return events.create_event(session, body.description, body.starts_at, body.capacity, clock)
+async def create_event(
+    body: CreateEvent, session: DatabaseSession, clock: RequestClock
+) -> EventView:
+    return await events.create_event(
+        session, body.description, body.starts_at, body.capacity, clock
+    )
 
 
 @router.patch("/{event_id}/schedule", dependencies=organizer)
-def reschedule_event(
+async def reschedule_event(
     event_id: UUID, body: RescheduleEvent, session: DatabaseSession, clock: RequestClock
 ) -> EventView:
-    return events.reschedule_event(
+    return await events.reschedule_event(
         session, event_id, body.starts_at, body.expected_schedule_version, clock
     )
 
 
 @router.post("/{event_id}/registrations", status_code=202)
-def register(
+async def register(
     event_id: UUID, body: Register, session: DatabaseSession, clock: RequestClock
 ) -> RegistrationAccepted:
-    registrations.register(session, event_id, body.email, clock)
+    await registrations.register(session, event_id, body.email, clock)
     return RegistrationAccepted()
 
 
 @router.post("/{event_id}/check-ins", dependencies=organizer)
-def check_in(
+async def check_in(
     event_id: UUID, body: CheckIn, session: DatabaseSession, clock: RequestClock
 ) -> RegistrationView:
-    return checkins.check_in(session, event_id, body.ticket_code, clock)
+    return await checkins.check_in(session, event_id, body.ticket_code, clock)

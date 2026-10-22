@@ -5,7 +5,7 @@ from uuid import UUID
 
 from email_validator import EmailNotValidError, validate_email
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Event, Registration, RegistrationStatus
 from app.services.errors import Conflict, InvalidInput, NotFound, Unauthorized
@@ -50,9 +50,9 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def lock_event(session: Session, event_id: UUID) -> Event:
+async def lock_event(session: AsyncSession, event_id: UUID) -> Event:
     with session.no_autoflush:
-        event = session.scalar(
+        event = await session.scalar(
             select(Event)
             .where(Event.id == event_id)
             .with_for_update()
@@ -80,8 +80,8 @@ def registration_view(entry: Registration) -> RegistrationView:
     )
 
 
-def find_registration(session: Session, token: str) -> Registration:
-    entry = session.scalar(
+async def find_registration(session: AsyncSession, token: str) -> Registration:
+    entry = await session.scalar(
         select(Registration)
         .where(Registration.manage_token_hash == token_hash(token))
         .execution_options(populate_existing=True)
@@ -91,7 +91,7 @@ def find_registration(session: Session, token: str) -> Registration:
     return entry
 
 
-def event_views(session: Session, event_id: UUID | None = None) -> list[EventView]:
+async def event_views(session: AsyncSession, event_id: UUID | None = None) -> list[EventView]:
     query = (
         select(
             Event.id,
@@ -111,11 +111,11 @@ def event_views(session: Session, event_id: UUID | None = None) -> list[EventVie
     )
     if event_id is not None:
         query = query.where(Event.id == event_id)
-    return [EventView(*row) for row in session.execute(query)]
+    return [EventView(*row) for row in (await session.execute(query))]
 
 
-def event_view(session: Session, event_id: UUID) -> EventView:
-    views = event_views(session, event_id)
+async def event_view(session: AsyncSession, event_id: UUID) -> EventView:
+    views = await event_views(session, event_id)
     if not views:
         raise NotFound("event_not_found", "Мероприятие не найдено")
     return views[0]

@@ -3,7 +3,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import Clock, as_utc, utc_now
 from app.db.models import Event, Registration, RegistrationStatus
@@ -26,56 +26,64 @@ from app.services.common import (
 from app.services.errors import Conflict, Unauthorized
 
 
-def confirmed_count(session: Session, event: Event) -> int:
-    return session.execute(
-        select(func.count())
-        .select_from(Registration)
-        .where(
-            Registration.event_id == event.id, Registration.status == RegistrationStatus.CONFIRMED
+async def confirmed_count(session: AsyncSession, event: Event) -> int:
+    return (
+        await session.execute(
+            select(func.count())
+            .select_from(Registration)
+            .where(
+                Registration.event_id == event.id,
+                Registration.status == RegistrationStatus.CONFIRMED,
+            )
         )
     ).scalar_one()
 
 
-def fill_vacancies(session: Session, event: Event, now: datetime) -> None:
-    available = event.capacity - confirmed_count(session, event)
+async def fill_vacancies(session: AsyncSession, event: Event, now: datetime) -> None:
+    available = event.capacity - (await confirmed_count(session, event))
     if available <= 0:
         return
-    waiting = session.scalars(
-        select(Registration)
-        .where(
-            Registration.event_id == event.id, Registration.status == RegistrationStatus.WAITLISTED
+    waiting = (
+        await session.scalars(
+            select(Registration)
+            .where(
+                Registration.event_id == event.id,
+                Registration.status == RegistrationStatus.WAITLISTED,
+            )
+            .order_by(Registration.waitlist_seq)
+            .limit(available)
         )
-        .order_by(Registration.waitlist_seq)
-        .limit(available)
     ).all()
     for entry in waiting:
         entry.status = RegistrationStatus.CONFIRMED
         entry.waitlist_seq = None
         entry.ticket_code = secrets.token_urlsafe(24)
-        session.flush()
-        refresh_unprepared_notices(session, entry, event)
-        queue_participation_notice(session, entry, event, now)
-        sync_reminder(session, entry, event, now)
+        await session.flush()
+        await refresh_unprepared_notices(session, entry, event)
+        await queue_participation_notice(session, entry, event, now)
+        await sync_reminder(session, entry, event, now)
 
 
-def assign_place(session: Session, entry: Registration, event: Event) -> None:
-    if confirmed_count(session, event) < event.capacity:
+async def assign_place(session: AsyncSession, entry: Registration, event: Event) -> None:
+    if (await confirmed_count(session, event)) < event.capacity:
         entry.status = RegistrationStatus.CONFIRMED
         entry.waitlist_seq = None
         entry.ticket_code = secrets.token_urlsafe(24)
     else:
-        position = next_waitlist_seq(session, event.id)
+        position = await next_waitlist_seq(session, event.id)
         entry.status = RegistrationStatus.WAITLISTED
         entry.ticket_code = None
         entry.waitlist_seq = position
 
 
-def register(session: Session, event_id: UUID, email: str, clock: Clock = utc_now) -> None:
+async def register(
+    session: AsyncSession, event_id: UUID, email: str, clock: Clock = utc_now
+) -> None:
     email = normalize_email(email)
-    with session.begin():
-        event = lock_event(session, event_id)
+    async with session.begin():
+        event = await lock_event(session, event_id)
         now = as_utc(clock())
-        existing = session.scalar(
+        existing = await session.scalar(
             select(Registration.id).where(
                 Registration.event_id == event_id, Registration.email == email
             )
@@ -86,37 +94,37 @@ def register(session: Session, event_id: UUID, email: str, clock: Clock = utc_no
         # result for a new address would disclose whether this email is stored.
         if now >= event.starts_at:
             return
-        fill_vacancies(session, event, now)
+        await fill_vacancies(session, event, now)
         token = secrets.token_urlsafe(32)
         entry = Registration(event_id=event_id, email=email, manage_token_hash=token_hash(token))
-        assign_place(session, entry, event)
+        await assign_place(session, entry, event)
         session.add(entry)
-        session.flush()
-        queue_participation_notice(session, entry, event, now, initial_token=token)
-        sync_reminder(session, entry, event, now)
+        await session.flush()
+        await queue_participation_notice(session, entry, event, now, initial_token=token)
+        await sync_reminder(session, entry, event, now)
 
 
-def get_registration(session: Session, token: str) -> RegistrationView:
-    with session.begin():
-        return registration_view(find_registration(session, token))
+async def get_registration(session: AsyncSession, token: str) -> RegistrationView:
+    async with session.begin():
+        return registration_view(await find_registration(session, token))
 
 
-def locked_registration(session: Session, token: str) -> tuple[Event, Registration]:
+async def locked_registration(session: AsyncSession, token: str) -> tuple[Event, Registration]:
     # Discover only the event ID, then reread registration after obtaining its lock.
-    event_id = session.scalar(
+    event_id = await session.scalar(
         select(Registration.event_id).where(Registration.manage_token_hash == token_hash(token))
     )
     if event_id is None:
         raise Unauthorized("invalid_participant_token", "Неверный токен участника")
-    event = lock_event(session, event_id)
-    return event, find_registration(session, token)
+    event = await lock_event(session, event_id)
+    return event, (await find_registration(session, token))
 
 
-def cancel(
-    session: Session, token: str, expected_participation_no: int, clock: Clock = utc_now
+async def cancel(
+    session: AsyncSession, token: str, expected_participation_no: int, clock: Clock = utc_now
 ) -> RegistrationView:
-    with session.begin():
-        event, entry = locked_registration(session, token)
+    async with session.begin():
+        event, entry = await locked_registration(session, token)
         now = as_utc(clock())
         if expected_participation_no != entry.participation_no:
             raise Conflict("participation_conflict", "Участие изменилось; обновите регистрацию")
@@ -129,18 +137,18 @@ def cancel(
         entry.status = RegistrationStatus.CANCELLED
         entry.ticket_code = None
         entry.waitlist_seq = None
-        session.flush()
-        cancel_unprepared(session, entry)
+        await session.flush()
+        await cancel_unprepared(session, entry)
         if was_confirmed:
-            fill_vacancies(session, event, now)
+            await fill_vacancies(session, event, now)
         return registration_view(entry)
 
 
-def resume(
-    session: Session, token: str, expected_participation_no: int, clock: Clock = utc_now
+async def resume(
+    session: AsyncSession, token: str, expected_participation_no: int, clock: Clock = utc_now
 ) -> RegistrationView:
-    with session.begin():
-        event, entry = locked_registration(session, token)
+    async with session.begin():
+        event, entry = await locked_registration(session, token)
         now = as_utc(clock())
         if (
             entry.participation_no == expected_participation_no + 1
@@ -153,10 +161,10 @@ def resume(
         ):
             raise Conflict("participation_conflict", "Участие изменилось; обновите регистрацию")
         require_before_start(event, now)
-        fill_vacancies(session, event, now)
+        await fill_vacancies(session, event, now)
         entry.participation_no += 1
-        assign_place(session, entry, event)
-        session.flush()
-        queue_participation_notice(session, entry, event, now)
-        sync_reminder(session, entry, event, now)
+        await assign_place(session, entry, event)
+        await session.flush()
+        await queue_participation_notice(session, entry, event, now)
+        await sync_reminder(session, entry, event, now)
         return registration_view(entry)

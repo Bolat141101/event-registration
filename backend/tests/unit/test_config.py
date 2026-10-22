@@ -14,7 +14,14 @@ def test_rejects_short_organizer_secret(settings: Settings, secret: str) -> None
         Settings(database_url=str(settings.database_url), organizer_token=secret)
 
 
-@pytest.mark.parametrize("url", ["sqlite:///app.db", "postgresql://user:password@localhost/events"])
-def test_requires_postgresql_psycopg(settings: Settings, url: str) -> None:
+@pytest.mark.parametrize(
+    "url",
+    [
+        "sqlite:///app.db",
+        "postgresql://user:password@localhost/events",
+        "postgresql+psycopg://user:password@localhost/events",
+    ],
+)
+def test_requires_postgresql_asyncpg(settings: Settings, url: str) -> None:
     with pytest.raises(ValidationError):
         Settings(database_url=url, organizer_token=settings.organizer_token)

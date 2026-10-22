@@ -139,3 +139,19 @@
 Дополнение после ревью, контрольная отметка `2026-10-22T11:36:03+05:00`: для публичного POST регистрации после начала выбран одинаковый нейтральный 202 и для нового, и для существующего корректного email, без создания нового участия/outbox. Иначе сочетание 202 для повтора и 409 для нового адреса раскрывает наличие записи. Это явное разрешение противоречия приватности и временного запрета, а не разрешение поздней регистрации. Остальные новые запрещённые по времени переходы возвращают 409. Добавлен регрессионный HTTP-тест с проверкой неизменности данных; временные тесты сохраняют проверку чтения Clock после event-lock. Схема не меняется.
 
 Техническое исправление запуска, контрольная отметка `2026-10-22T11:42:36+05:00`: после пересоздания API обычный Nginx давал 502 из-за сохранённого старого IP upstream. В frontend/nginx.conf добавлены Docker resolver 127.0.0.11 (valid=5s, timeout=2s) и переменная proxy_pass без URI. Это не новый экран/протокол, а устранение реально воспроизведённой ошибки обновления. Синтаксис и проксирование проверены; поведение resolver и сохранение URI сверены с [NGINX proxy_pass](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_pass) и [NGINX resolver](https://nginx.org/en/docs/http/ngx_http_core_module.html#resolver). Во время остановленного API/короткого DNS-кэша возможен временный 502, но старый адрес не сохраняется бессрочно.
+
+
+## Переход Core API на async — 2026-10-22
+
+Контрольная отметка: `2026-10-22T16:20:48+05:00`. Переход разрешён прямым запросом пользователя; это изменение доступа к БД, бизнес-контракты этапа 2 сохранены.
+
+| Решение | Причина и компромисс | Проверка |
+|---|---|---|
+| AsyncSession + asyncpg; DSN только postgresql+asyncpg | Ожидание PostgreSQL не блокирует event loop; синхронный psycopg удалён из зависимостей, остальные версии сохранены | Полный PostgreSQL Pytest, Mypy, отсутствие синхронных DB-вызовов в Core |
+| Одна сессия/транзакция на операцию, expire_on_commit=False | Сессия не потокобезопасна и не допускает совместного использования задачами; явные await без скрытого reload после commit | Независимые asyncio-задачи конкурируют за реальный event-lock; отмена задачи откатывает запись и outbox |
+| READ COMMITTED, event FOR UPDATE и MAX отдельным statement сохранены | Async не заменяет ACID/блокировки и не ускоряет последовательные мутации одного события | Последнее место, одинаковый email, FIFO, cancel/resume/checkin и rollback |
+| Alembic AsyncConnection.run_sync, прежние revision-файлы без изменений | Официальный адаптер Alembic/SQLAlchemy выполняет SQL через asyncpg; новая схема не требуется | Round-trip пустой тестовой БД, upgrade данных 0001→0002, запрет потери данных downgrade, check и SHA256 прежних файлов |
+| asyncio для инфраструктурного worker, один процесс | Общий async-драйвер без второго стека БД; доставка/leases/Celery по-прежнему отложены | Запуск/завершение контейнера и readiness БД; SMTP этим этапом не заявляется |
+| Временные ошибки подключения asyncpg сохраняют 503 без секретов | asyncpg может выдавать OSError/TimeoutError до SQLAlchemy DBAPI wrapper | API/health регрессии ошибок соединения, настоящий lock timeout |
+
+Основание для адаптации: [SQLAlchemy asyncio](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html), [Alembic asyncio cookbook](https://alembic.sqlalchemy.org/en/latest/cookbook.html#using-asyncio-with-alembic), [SQLAlchemy asyncpg dialect](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#asyncpg). `run_sync` не используется как обход асинхронности бизнес-сервисов.

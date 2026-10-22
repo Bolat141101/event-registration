@@ -46,3 +46,11 @@ async def test_database_error_does_not_expose_credentials(client: AsyncClient) -
         response = await client.get("/api/health")
     assert response.status_code == 503
     assert "private-password" not in response.text
+
+
+@pytest.mark.parametrize("error", [TimeoutError("private timeout"), OSError("private connection")])
+async def test_health_handles_async_connection_failure(client: AsyncClient, error: OSError) -> None:
+    with patch("app.api.health.database_is_ready", side_effect=error):
+        response = await client.get("/api/health")
+    assert response.status_code == 503
+    assert str(error) not in response.text

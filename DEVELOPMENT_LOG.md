@@ -181,3 +181,90 @@ SELECT version_num FROM alembic_version;
 Полный PostgreSQL-прогон из корня: `docker compose --profile test run --rm --volume /Users/billcarter/Documents/MadDevs/backend/app:/app/app:ro --volume /Users/billcarter/Documents/MadDevs/backend/tests:/app/tests:ro test`. Использован существующий test-образ с прежними зависимостями и текущими исходниками; внутри выполнены `alembic upgrade head && pytest && alembic check`. Тесты работают только с event_registration_test; тестовая БД затем останавливается, команды удаления volumes не используются.
 
 README больше не относит регистрацию/FIFO/чекин к будущим задачам, описывает реализованные services/outbox и оставшиеся SMTP/SSE/экраны. API возвращает validation_error/422 для `0001-01-01T00:00:00+01:00`, `9999-12-31T23:59:59-01:00` и описаний с NUL; бизнес-сервис не вызывается. Схема/миграции/зависимости не менялись, commit/push не выполнялись.
+
+## Переход Core API на AsyncSession/asyncpg — 2026-10-22
+
+Время ниже — контрольные отметки реально выполненной работы, Asia/Almaty (UTC+05:00). История предыдущих этапов сохранена. Начальное рабочее дерево чистое, HEAD `9a5694a`, staged diff пуст. Прямое разрешение пользователя: перевести существующий Core API на async, сохранить бизнес-операции и контракты; прежние revisions и данные не менять.
+
+| Время Алматы | Фактически выполнено к отметке | Результат |
+|---|---|---|
+| 2026-10-22T16:06:25+05:00 | Начало работы: проверка git status/diff/log, актуального кода, миграций и тестов | Исходный этап 2 сохранён пользователем в 9a5694a. Перед правками дополнительно сохранены OpenAPI и SHA256 моделей/двух revision-файлов для сравнения |
+| 2026-10-22T16:18:31+05:00 | DB-операции, endpoints, dependency и worker переведены на asyncpg/AsyncSession; адаптированы фикстуры, конкурентные тесты и Alembic env; локальные Ruff/format/Mypy прошли | Первое сравнение OpenAPI совпало. Создан отдельный Compose-проект event-registration-async-check-20261022; test-db в tmpfs, случайный loopback-порт 55012. Основная БД не используется |
+| 2026-10-22T16:20:48+05:00 | Выполнен первый полный PostgreSQL Pytest; исправлены ошибки адаптации тестов и запущен повтор | Первый результат: 122 passed, 2 failed и teardown error из-за неawaited callback; наблюдатель pg_stat_activity также читал закэшированный снимок. Добавлены await operation() и pg_stat_clear_snapshot в наблюдателе, проверки не ослаблены |
+| 2026-10-22T16:23:34+05:00 | Повторный локальный полный Pytest и check прошли; завершены контейнерные Ruff/format/Mypy, свежий TypeScript/Vite build и запуск изолированного полного стека | 124 passed за 8.13s, без skip/xfail; No new upgrade operations detected. Чистая БД отдельного приложения, migrate exit 0; api/db/frontend/Mailpit healthy, worker запущен |
+| 2026-10-22T16:24:25+05:00 | Завершён штатный контейнерный CI-прогон и настоящий HTTP smoke через frontend; OpenAPI и SHA256 сравнены повторно | 124 passed за 6.19s, без skip/xfail. Все маршруты этапа 2 и 200/201/202/401/404/409/422 подтверждены. OpenAPI идентичен; models.py и revision-файлы побайтно прежние |
+| 2026-10-22T16:26:03+05:00 | Явные CLI downgrade base → upgrade head → current → check выполнены только в пустой *_test; PostgreSQL подтвердил 24 поля; проверены недоступность/восстановление изолированной БД и SIGTERM worker | head=0002_simplify_schema; events=5, registrations=9, email_outbox=10. Во время остановки БД health/events=503, затем health=200. Первая команда рестарта без POSTGRES_PORT=0 конфликтовала с занятым 5433; повтор с динамическим портом успешен. Основной контейнер/volume не затронут. Worker вывел Worker stopped, без принудительного kill |
+
+### Реализованные изменения
+
+- `backend/app/db/session.py`: create_async_engine + async_sessionmaker; READ COMMITTED, pool_pre_ping, hide_parameters и expire_on_commit=False сохранены. connect timeout=3s и server_settings lock_timeout=2s/statement_timeout=3s адаптированы к asyncpg.
+- `backend/app/api/{events,registrations,health,dependencies}.py`, `backend/app/main.py`: async endpoints, async session dependency, awaited readiness и закрытие engine в lifespan. API-схемы/маршруты/коды успешных операций не менялись.
+- `backend/app/services/{common,events,registrations,checkins}.py`, `backend/app/db/waitlist.py`, `backend/app/notifications/outbox.py`: явные await для SQL/flush/refresh и async transaction contexts. Event-first lock, отдельный MAX statement, FIFO-продвижение, idempotency/версии, токены/билеты, одно напоминание и неизменность prepared outbox сохранены. Helpers не делают собственный commit.
+- `backend/app/api/errors.py`: временные ошибки asyncpg, включая OSError/TimeoutError до SQLAlchemy wrapper, connection_invalidated и SQLSTATE недоступности, переводятся в прежний безопасный 503. SQL/параметры/секреты не логируются.
+- `backend/app/worker.py`: asyncio.Event и ожидание интервала/сигнала без threading.Event.wait; awaited DB readiness и dispose. Это всё ещё инфраструктурная проверка, не реализация доставки.
+- `backend/migrations/env.py`: AsyncEngine + официальный run_sync-адаптер Alembic; только в тестовом harness синхронные публичные Alembic commands запускаются через asyncio.to_thread, чтобы не вкладывать asyncio.run в AnyIO. SQL использует asyncpg. Новых migrations нет, файлы versions и модели не менялись.
+- `backend/pyproject.toml`, оба requirements lock, `backend/app/config.py`, `compose.yaml`: sqlalchemy[asyncio], asyncpg 0.32.0, DSN postgresql+asyncpg; psycopg/psycopg-binary убраны из зависимостей. Остальные закреплённые версии сохранены, greenlet остаётся необходимым адаптером SQLAlchemy.
+- `backend/tests/conftest.py`, integration fixtures/support и все integration tests: AnyIO/asyncio, AsyncEngine/AsyncSession, отдельная сессия каждой конкурентной задаче, функция-фикстура engine без передачи asyncpg-пула между event loop. В тестах миграций пул очищается после внешнего DDL.
+- Семь дополнительных проверок: отказ от sync DSN (1), чтение/health во время реального event-lock (1), OSError/TimeoutError API (2), отмена задачи с rollback регистрации+outbox и освобождением lock (1), ошибки соединения health (2). Все прежние 117 проверок сохранены; предупреждения остаются ошибками.
+- README/ARCHITECTURE/DECISIONS/docs/WORKER_EVOLUTION обновлены: текущая async-модель, смена DSN без пересоздания БД, адаптация Alembic, владение сессией и будущие границы worker. Исторические решения не переписаны задним числом.
+
+### Фактические команды и результаты
+
+Для контейнерных команд ниже общий префикс P: `docker compose --env-file .env.example -f compose.yaml -f /tmp/MadDevs-async-test-port.yaml -p event-registration-async-check-20261022 --profile test`. Временный override только публикует test-db как `127.0.0.1:0:5432` для локального Pytest. Он не меняет сервисы основного проекта. При запуске всего стека заданы `POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0`; основные volumes не используются. `P …` в таблице — сокращённая запись фактически выполненного полного префикса с аргументами. Первые lint/build команды выполнялись также без временного override, который к ним не относится.
+
+| Проверка | Реально выполненная команда | Итог |
+|---|---|---|
+| Ruff локально | из backend: `.venv/bin/ruff check .` | PASS |
+| Форматирование локально | из backend: `.venv/bin/ruff format --check .` | PASS, 40 файлов |
+| Mypy локально | из backend: `.venv/bin/mypy app` | PASS, 25 файлов |
+| Полный локальный PostgreSQL Pytest | из backend: `.venv/bin/pytest -q`; DATABASE_URL/TEST_DATABASE_URL указывали на выделенную event_registration_test через 127.0.0.1:55012, драйвер asyncpg | PASS, 124 за 8.13s; первый неуспешный прогон описан выше |
+| Локальный Alembic | из backend: `.venv/bin/alembic upgrade head`, `.venv/bin/alembic check` с тем же тестовым DSN | PASS |
+| Compose config | `docker compose --env-file .env.example -p event-registration-async-check-20261022 --profile test config --quiet` | PASS |
+| Backend/test/frontend images | `docker compose --env-file .env.example -p event-registration-async-check-20261022 --profile test build api test frontend`; затем актуальные api/test пересобраны | PASS; frontend первоначально использовал кэш, далее сборка выполнена заново отдельной командой |
+| Ruff/format/Mypy контейнера | `P run --rm --no-deps test ruff check .`; `P run --rm --no-deps test ruff format --check .`; `P run --rm --no-deps test mypy app` | PASS, включая повтор в окончательном test image |
+| Штатный CI database step | `P build test`, `P run --rm test`; внутри `alembic upgrade head && pytest && alembic check` | PASS, 124 за 6.19s, без skip/xfail |
+| Отдельный round-trip CLI | `P run --rm --no-deps test alembic downgrade base`; затем `alembic upgrade head`, `alembic current`, `alembic check` с тем же префиксом | PASS, head 0002; check без расхождений |
+| Свежие TypeScript/Vite | `docker build --target build -t event-registration-async-frontend-check:local frontend`; `docker run --rm --network none event-registration-async-frontend-check:local npm run build` | PASS: tsc --noEmit + Vite 8.3.4, 17 modules, built in 2.53s |
+| Чистая БД и полный Compose | `P up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend`; `P ps --all` | PASS, migrate=0, сервисы готовы; worker не имеет своего healthcheck |
+| HTTP health через proxy | `curl --fail --silent --show-error http://127.0.0.1:55015/api/health` | 200, ok/ready |
+| Настоящий HTTP Core smoke | `P exec -T -e ALLOW_ISOLATED_SMOKE=yes api python - < /tmp/MadDevs-async-smoke.py` | PASS, все имеющиеся бизнес-маршруты, FIFO/resume/перенос/checkin; счётчики 1/1/1, два reminder на две регистрации, два уведомления переноса; PostgreSQL снова подтвердил 24 поля |
+| Отказ и восстановление БД | `P stop db`, HTTP GET health/events через urllib, затем `P up --no-deps -d --wait --wait-timeout 60 db` с переменными динамических портов | PASS: 503/503 без секретов → 200 health; конфликт порта первой команды исправлен |
+| Остановка worker | `P stop worker`; `P logs --no-color --tail 12 worker` | PASS, INFO Worker stopped |
+| Неизменность контрактов/схемы | сравнение OpenAPI и SHA256 с сохранёнными до правок; `git diff --exit-code HEAD -- backend/migrations/versions backend/app/db/models.py` | PASS; без новых колонок/revisions |
+| Diff | `git diff --check`, `git status --short --branch`, `git diff --stat` | PASS; изменения не staged, commit/push отсутствуют |
+
+Все проверки выполнены локально; GitHub Actions удалённо не запускался. Существующий workflow не менялся: команды и сервисы прежние, DSN/dependency изменены в Compose/образах. Ошибки тестовой адаптации и команды рестарта исправлены, проверки не отключались. SMTP, MIME, отправочные retries, SSE и полноценный UI остаются будущими этапами; этот переход их не реализует. Async не увеличивает число одновременных мутаций одного события под event-lock и не устраняет неопределённость исхода при потере соединения в момент COMMIT.
+
+
+Контрольная отметка завершения проверок и уборки: `2026-10-22T16:28:28+05:00` (22 минуты 3 секунды от начальной отметки). Выполнен `P down --remove-orphans` **без --volumes**: временные контейнеры и сеть удалены, оба созданных проверкой volumes оставлены. Основные api/db/frontend/Mailpit остались healthy, прежний worker работает, исходная test-db осталась остановленной. Основное приложение не пересоздавалось, его данные и volumes не изменялись. Список прежних test-функций сопоставлен с HEAD: все сохранены, только название теста sync DSN заменено на asyncpg. На последней проверке неустранённых падений нет; рабочее дерево содержит изменения этого перехода, индекс пуст, HEAD 9a5694a сохранён. Git-коммитов и push нет.
+
+## Валидация ticket_code и HTTP-конкуренция двух процессов — 2026-10-22
+
+| Время Алматы | Фактически выполнено к отметке | Результат |
+|---|---|---|
+| 2026-10-22T17:10:29+05:00 | Проверены актуальные status/diff, схемы ввода, API-тесты, async-сервисы и фикстуры | Незакоммиченный async-переход сохранён. Перед правками записаны SHA256 services/db/migrations для контроля отсутствия изменений бизнес-логики |
+| 2026-10-22T17:14:02+05:00 | Добавлен валидатор CheckIn.ticket_code, три API-регрессии NUL; исправлена проверка результата HTTP-регистрации; добавлен test_api_processes.py | Код билета отклоняется до SQL; результат POST читается из PostgreSQL без business.join. Два spawned Uvicorn-процесса имеют разные PID, порты, lifespan, engines и пулы. Начат полный Pytest на отдельной PostgreSQL; первоначальная команда с неподдерживаемым Compose run --no-build не запускалась, флаг убран |
+| 2026-10-22T17:15:22+05:00 | Первый полный PostgreSQL-прогон и Alembic check прошли; доработан teardown всех дочерних процессов и сравнение билета API с БД; повтор запущен | 129 passed за 10.24s; Ruff/format/Mypy проходят. Проверки не отключались |
+| 2026-10-22T17:15:45+05:00 | Завершён повтор всего Pytest/Alembic после окончательных правок; сопоставлены SHA256 бизнес-кода и AST исправленного HTTP-теста | 129 passed за 9.81s, без skip/xfail; No new upgrade operations detected. Services, db и migrations не изменялись в этом этапе; в проверяемом HTTP-тесте нет вызова join |
+
+Изменения этого запроса:
+
+- `backend/app/api/schemas.py`, CheckIn.no_null_character: U+0000 в любом месте ticket_code вызывает ValueError входной схемы и прежний validation_error/HTTP 422. Другие допустимые коды и бизнес-правила чекина сохранены.
+- `backend/tests/integration/test_api.py`: после регистрационного POST выполняются только SELECT для проверки одной регистрации и двух outbox-записей ticket/reminder. Проверяются статус, номер участия, нормализованный email, ticket_code, dedup_key, pending-состояние и hash токена из первого payload. Последующие cancel/resume выполняются через API как раньше. Добавлены три запроса с NUL в начале/середине/всём коде; чекин уже доступен по времени, ответ 422 и сохранённое состояние проверяются на PostgreSQL.
+- Новый `backend/tests/integration/test_api_processes.py`: два настоящих HTTP API-процесса через multiprocessing spawn; никакого ASGITransport для конкурентных действий. Перед выпуском event-lock наблюдатель PostgreSQL с обновляемым статистическим снимком подтверждает две ожидающие транзакции. Для capacity=1 проверяются 202/202, ровно 1 confirmed + 1 waitlisted, один билет, FIFO-позиция 1 и четыре уникальных outbox-задания. Для одного билета проверяются 200/409, единственное сохранённое время, повторы 409 через оба процесса и счётчик checked_in=1. Подготовка участника для checkin выполняется до проверяемых HTTP-запросов; результат чекина не создаётся вспомогательными сервисами. В teardown завершаются оба процесса, принудительный kill считается ошибкой теста.
+- README дополнен фактически выполненной проверкой двух процессов. Новых зависимостей, миграций и инфраструктурных сервисов нет.
+
+Фактические проверки:
+
+| Команда | Результат |
+|---|---|
+| `backend/.venv/bin/ruff check backend` | PASS |
+| `backend/.venv/bin/ruff format --check backend` | PASS, 41 Python-файл |
+| `backend/.venv/bin/mypy --config-file backend/pyproject.toml backend/app` | PASS, 25 файлов |
+| `docker compose --env-file .env.example -p event-registration-async-check-20261022 --profile test run --rm --volume /Users/billcarter/Documents/MadDevs/backend/app:/app/app:ro --volume /Users/billcarter/Documents/MadDevs/backend/tests:/app/tests:ro test` | PASS: alembic upgrade head && pytest && alembic check; окончательно 129 passed за 9.81s, без skip/xfail. Использован существующий test image с неизменными asyncpg-зависимостями и актуальными исходниками в read-only mount |
+| SHA256 services/db/migrations против начала текущего запроса | PASS, бизнес-логика/схема/миграции сохранены |
+| `git diff --check` | PASS |
+
+Запускался только test-db из отдельного проекта в tmpfs. Основная PostgreSQL, её данные и volumes не использовались. Существующие незакоммиченные изменения не откатывались; Git add/commit/push не выполнялись. Новый test_api_processes.py пока untracked и не входит в обычный git diff --stat; его статистика выводится отдельно через git diff --no-index /dev/null.
+
+Дополнительная контрольная отметка `2026-10-22T17:17:57+05:00`: часы двух API-процессов разнесены на одну секунду. Тест теперь сравнивает checked_in_at с часами именно выигравшего процесса, затем проверяет отсутствие перезаписи после проигравшего и повторных запросов. После изменения снова выполнены Ruff, format, Mypy и полный PostgreSQL-прогон той же командой: **129 passed за 8.73s**, без skip/xfail, Alembic check — No new upgrade operations detected. SHA256 services/db/migrations повторно совпали. Это окончательный результат текущего запроса; прежние прогоны 10.24s/9.81s сохранены выше как история.

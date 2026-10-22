@@ -44,11 +44,15 @@ def install_error_handlers(app: FastAPI) -> None:
             },
         )
 
+    @app.exception_handler(OSError)
     @app.exception_handler(SQLAlchemyError)
-    async def database_error(_request: Request, exc: SQLAlchemyError) -> JSONResponse:
+    async def database_error(_request: Request, exc: SQLAlchemyError | OSError) -> JSONResponse:
         sqlstate = getattr(exc.orig, "sqlstate", "") if isinstance(exc, DBAPIError) else ""
-        temporary = isinstance(exc, (OperationalError, DisconnectionError, PoolTimeout)) or (
-            sqlstate in {"55P03", "57014", "40P01", "40001"}
+        temporary = isinstance(
+            exc, (OperationalError, DisconnectionError, PoolTimeout, OSError)
+        ) or (
+            sqlstate in {"55P03", "57014", "40P01", "40001", "57P01", "57P02", "57P03", "53300"}
+            or (isinstance(exc, DBAPIError) and exc.connection_invalidated)
             or bool(sqlstate and sqlstate.startswith("08"))
         )
         # Never log SQL parameters, Authorization, email payloads or exception text.

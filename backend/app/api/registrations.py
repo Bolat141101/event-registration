@@ -9,25 +9,25 @@ router = APIRouter(prefix="/registration", tags=["registration"])
 
 
 @router.get("")
-def get_registration(session: DatabaseSession, token: ParticipantToken) -> RegistrationView:
-    return registrations.get_registration(session, token)
+async def get_registration(session: DatabaseSession, token: ParticipantToken) -> RegistrationView:
+    return await registrations.get_registration(session, token)
 
 
 @router.post("/cancel")
-def cancel(
+async def cancel(
     body: ParticipationChange,
     session: DatabaseSession,
     token: ParticipantToken,
     clock: RequestClock,
 ) -> RegistrationView:
-    return registrations.cancel(session, token, body.expected_participation_no, clock)
+    return await registrations.cancel(session, token, body.expected_participation_no, clock)
 
 
 @router.post("/resume")
-def resume(
+async def resume(
     body: ParticipationChange,
     session: DatabaseSession,
     token: ParticipantToken,
     clock: RequestClock,
 ) -> RegistrationView:
-    return registrations.resume(session, token, body.expected_participation_no, clock)
+    return await registrations.resume(session, token, body.expected_participation_no, clock)

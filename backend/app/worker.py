@@ -1,8 +1,9 @@
 """Infrastructure probe only. Outbox delivery is a subsequent implementation stage."""
 
+import asyncio
 import logging
 import signal
-from threading import Event
+from contextlib import suppress
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -13,27 +14,29 @@ from app.db.session import build_engine
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
+async def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     settings = Settings()
     engine = build_engine(settings)
     heads = expected_schema_heads()
-    stop = Event()
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
     logger.info("Worker infrastructure started; email delivery is not implemented yet")
     try:
         while not stop.is_set():
             try:
-                if not database_is_ready(engine, heads):
+                if not await database_is_ready(engine, heads):
                     logger.error("Database schema is not ready")
-            except SQLAlchemyError:
+            except (SQLAlchemyError, OSError, TimeoutError):
                 logger.warning("Database is unavailable; retrying on next poll")
-            stop.wait(settings.worker_poll_interval)
+            with suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=settings.worker_poll_interval)
     finally:
-        engine.dispose()
+        await engine.dispose()
         logger.info("Worker stopped")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(run())

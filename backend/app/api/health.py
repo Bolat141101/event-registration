@@ -17,10 +17,10 @@ class HealthResponse(BaseModel):
 
 
 @router.get("/health", response_model=HealthResponse)
-def health(request: Request, response: Response) -> HealthResponse:
+async def health(request: Request, response: Response) -> HealthResponse:
     try:
-        ready = database_is_ready(request.app.state.engine, request.app.state.schema_heads)
-    except SQLAlchemyError:
+        ready = await database_is_ready(request.app.state.engine, request.app.state.schema_heads)
+    except (SQLAlchemyError, OSError, TimeoutError):
         logger.warning("Database readiness check failed")
         ready = False
     if not ready:

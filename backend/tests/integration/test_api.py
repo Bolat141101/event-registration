@@ -1,3 +1,4 @@
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from datetime import timedelta
@@ -6,15 +7,15 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.db.models import Event, Registration
+from app.db.models import EmailOutbox, Event, NotificationKind, OutboxStatus, Registration
 from app.main import create_app
 from app.services.common import token_hash
-from tests.integration.business_support import Business
+from tests.integration.business_support import Business, Participant
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 ORGANIZER = "integration_organizer_secret_32_characters"
@@ -54,7 +55,7 @@ async def test_create_list_detail_and_aggregate_snapshots(
     business.event_ids.append(event_id)
     assert response.json()["description"] == "Встреча"
     assert response.json()["confirmed"] == response.json()["checked_in"] == 0
-    people = [business.join(event_id, f"person{i}@example.test") for i in range(3)]
+    people = [(await business.join(event_id, f"person{i}@example.test")) for i in range(3)]
     details = (await client.get(f"/api/events/{event_id}")).json()
     assert (details["confirmed"], details["waitlisted"], details["checked_in"]) == (2, 1, 0)
     assert details in (await client.get("/api/events")).json()
@@ -69,7 +70,7 @@ async def test_create_list_detail_and_aggregate_snapshots(
 async def test_organizer_required_for_every_mutation(
     client: AsyncClient, business: Business, operation: str, headers: dict[str, str]
 ) -> None:
-    event = business.create()
+    event = await business.create()
     method, path, body = {
         "create": (
             "POST",
@@ -123,22 +124,45 @@ async def test_private_routes_reject_missing_and_wrong_tokens(
 async def test_public_registration_privacy_and_private_cancel_resume(
     client: AsyncClient, business: Business, caplog: pytest.LogCaptureFixture
 ) -> None:
-    event = business.create()
+    event = await business.create()
     response = await client.post(
         f"/api/events/{event.id}/registrations", json={"email": " USER@example.test "}
     )
     assert response.status_code == 202
     neutral = response.json()
     assert set(neutral) == {"message"}
-    person = business.join(event.id, "user@example.test")
-    headers = {"Authorization": f"Bearer {person.token}"}
-    with Session(business.engine) as session:
-        entry = session.get(Registration, person.id)
+    async with AsyncSession(business.engine, expire_on_commit=False) as session:
+        # Read only: a service call here could create data the HTTP request failed to write.
+        entry = (
+            await session.scalars(select(Registration).where(Registration.event_id == event.id))
+        ).one()
+        messages = (
+            await session.scalars(
+                select(EmailOutbox).where(EmailOutbox.registration_id == entry.id)
+            )
+        ).all()
+        assert len(messages) == 2
+        by_kind = {message.kind: message for message in messages}
+        assert set(by_kind) == {NotificationKind.TICKET, NotificationKind.REMINDER}
+        assert all(message.status == OutboxStatus.PENDING for message in messages)
+        ticket = by_kind[NotificationKind.TICKET]
+        reminder = by_kind[NotificationKind.REMINDER]
+        assert ticket.dedup_key == f"ticket:{entry.id}:1"
+        assert reminder.dedup_key == f"reminder:{entry.id}"
+        assert ticket.payload["ticket_code"] == entry.ticket_code
+        assert entry.ticket_code is not None
+        assert entry.status == "confirmed" and entry.participation_no == 1
+        assert entry.waitlist_seq is None and entry.checked_in_at is None
+        assert all(message.payload["recipient"] == "user@example.test" for message in messages)
+        assert "manage_path" not in reminder.payload
+        person = Participant(entry.id, ticket.payload["manage_path"].split("#token=", 1)[1])
         assert entry.manage_token_hash == token_hash(person.token)
         assert entry.email == "user@example.test"
         assert entry.manage_token_hash != person.token
+    headers = {"Authorization": f"Bearer {person.token}"}
     private = await client.get("/api/registration", headers=headers)
     assert private.status_code == 200 and private.json()["ticket_code"]
+    assert private.json()["ticket_code"] == entry.ticket_code
     assert person.token not in private.text and "manage_token_hash" not in private.text
     cancelled = await client.post(
         "/api/registration/cancel", headers=headers, json={"expected_participation_no": 1}
@@ -148,7 +172,7 @@ async def test_public_registration_privacy_and_private_cancel_resume(
         f"/api/events/{event.id}/registrations", json={"email": "user@example.test"}
     )
     assert repeat.json() == neutral
-    assert business.private(person).status == "cancelled"
+    assert (await business.private(person)).status == "cancelled"
     resumed = await client.post(
         "/api/registration/resume", headers=headers, json={"expected_participation_no": 1}
     )
@@ -162,10 +186,30 @@ async def test_public_registration_privacy_and_private_cancel_resume(
     assert person.token not in response.text
 
 
+@pytest.mark.parametrize("ticket_code", ["\x00", "before\x00after", "\x00ticket\x00"])
+async def test_checkin_rejects_null_character_without_changing_registration(
+    client: AsyncClient, business: Business, ticket_code: str
+) -> None:
+    event = await business.create()
+    person = await business.join(event.id, "user@example.test")
+    before = await business.private(person)
+    business.clock.now = event.starts_at
+    response = await client.post(
+        f"/api/events/{event.id}/check-ins",
+        headers=AUTH,
+        json={"ticket_code": ticket_code},
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+    assert response.json()["errors"][0]["loc"] == ["body", "ticket_code"]
+    assert (await business.private(person)) == before
+    assert (await business.event(event.id)).checked_in == 0
+
+
 async def test_schedule_and_checkin_http_statuses(client: AsyncClient, business: Business) -> None:
-    event = business.create()
-    person = business.join(event.id, "user@example.test")
-    ticket = business.private(person).ticket_code
+    event = await business.create()
+    person = await business.join(event.id, "user@example.test")
+    ticket = (await business.private(person)).ticket_code
     body = {
         "starts_at": (event.starts_at + timedelta(hours=1)).isoformat(),
         "expected_schedule_version": 1,
@@ -249,10 +293,12 @@ async def test_create_rejects_dates_outside_utc_range_before_service(
 async def test_reschedule_rejects_dates_outside_utc_range_without_changes(
     client: AsyncClient, business: Business, starts_at: str
 ) -> None:
-    event = business.create()
-    person = business.join(event.id, "user@example.test")
-    before = business.event(event.id)
-    messages = [(m.id, m.payload, m.available_at, m.status) for m in business.messages(person)]
+    event = await business.create()
+    person = await business.join(event.id, "user@example.test")
+    before = await business.event(event.id)
+    messages = [
+        (m.id, m.payload, m.available_at, m.status) for m in (await business.messages(person))
+    ]
     with patch("app.api.events.events.reschedule_event") as reschedule:
         response = await client.patch(
             f"/api/events/{event.id}/schedule",
@@ -263,9 +309,9 @@ async def test_reschedule_rejects_dates_outside_utc_range_without_changes(
     assert response.json()["code"] == "validation_error"
     assert response.json()["errors"][0]["loc"] == ["body", "starts_at"]
     reschedule.assert_not_called()
-    assert business.event(event.id) == before
+    assert (await business.event(event.id)) == before
     assert [
-        (m.id, m.payload, m.available_at, m.status) for m in business.messages(person)
+        (m.id, m.payload, m.available_at, m.status) for m in (await business.messages(person))
     ] == messages
 
 
@@ -291,15 +337,15 @@ async def test_description_rejects_null_character_before_service(
 
 @pytest.mark.parametrize("email", ["bad", "a..b@example.test", "a@bad", "a@-example.test"])
 async def test_email_validation(client: AsyncClient, business: Business, email: str) -> None:
-    event = business.create()
+    event = await business.create()
     response = await client.post(f"/api/events/{event.id}/registrations", json={"email": email})
     assert response.status_code == 422
     assert response.json()["code"] == "invalid_email"
-    assert business.event(event.id).confirmed == 0
+    assert (await business.event(event.id)).confirmed == 0
 
 
 async def test_capacity_is_not_editable(client: AsyncClient, business: Business) -> None:
-    event = business.create()
+    event = await business.create()
     response = await client.patch(
         f"/api/events/{event.id}/schedule",
         headers=AUTH,
@@ -310,15 +356,15 @@ async def test_capacity_is_not_editable(client: AsyncClient, business: Business)
         },
     )
     assert response.status_code == 422
-    assert business.event(event.id).capacity == 1
+    assert (await business.event(event.id)).capacity == 1
 
 
 async def test_closed_registration_does_not_disclose_whether_email_exists(
     client: AsyncClient, business: Business
 ) -> None:
-    event = business.create()
-    person = business.join(event.id, "existing@example.test")
-    original = [(m.id, m.payload, m.status) for m in business.messages(person)]
+    event = await business.create()
+    person = await business.join(event.id, "existing@example.test")
+    original = [(m.id, m.payload, m.status) for m in (await business.messages(person))]
     business.clock.now = event.starts_at
     responses = [
         await client.post(f"/api/events/{event.id}/registrations", json={"email": email})
@@ -326,37 +372,38 @@ async def test_closed_registration_does_not_disclose_whether_email_exists(
     ]
     assert [response.status_code for response in responses] == [202, 202]
     assert responses[0].json() == responses[1].json()
-    with Session(business.engine) as session:
+    async with AsyncSession(business.engine, expire_on_commit=False) as session:
         assert (
-            session.scalar(select(Registration.id).where(Registration.email == "new@example.test"))
-            is None
-        )
-    assert business.event(event.id).confirmed == 1
-    assert [(m.id, m.payload, m.status) for m in business.messages(person)] == original
+            await session.scalar(
+                select(Registration.id).where(Registration.email == "new@example.test")
+            )
+        ) is None
+    assert (await business.event(event.id)).confirmed == 1
+    assert [(m.id, m.payload, m.status) for m in (await business.messages(person))] == original
 
 
 async def test_real_lock_timeout_returns_503_and_rolls_back(
     client: AsyncClient, business: Business
 ) -> None:
-    event = business.create()
-    with Session(business.engine) as blocker, blocker.begin():
-        blocker.execute(select(Event.id).where(Event.id == event.id).with_for_update())
+    event = await business.create()
+    async with AsyncSession(business.engine, expire_on_commit=False) as blocker, blocker.begin():
+        await blocker.execute(select(Event.id).where(Event.id == event.id).with_for_update())
         response = await client.post(
             f"/api/events/{event.id}/registrations", json={"email": "user@example.test"}
         )
         assert response.status_code == 503
         assert response.json()["code"] == "database_unavailable"
-    assert business.event(event.id).confirmed == 0
+    assert (await business.event(event.id)).confirmed == 0
     response = await client.post(
         f"/api/events/{event.id}/registrations", json={"email": "user@example.test"}
     )
-    assert response.status_code == 202 and business.event(event.id).confirmed == 1
+    assert response.status_code == 202 and (await business.event(event.id)).confirmed == 1
 
 
 async def test_database_errors_do_not_expose_secrets(
     client: AsyncClient, business: Business, caplog: pytest.LogCaptureFixture
 ) -> None:
-    event = business.create()
+    event = await business.create()
     error = OperationalError(
         "SQL private-token", {"password": "private-password"}, Exception("private-password")
     )
@@ -377,3 +424,54 @@ async def test_openapi_exposes_new_routes(client: AsyncClient) -> None:
     assert "patch" in paths["/api/events/{event_id}/schedule"]
     assert "/api/registration/resume" in paths
     assert "/api/events/{event_id}/stream" not in paths
+
+
+async def test_waiting_for_event_lock_does_not_block_other_requests(
+    client: AsyncClient, business: Business
+) -> None:
+    event = await business.create()
+    async with (
+        asyncio.TaskGroup() as group,
+        AsyncSession(business.engine) as blocker,
+        blocker.begin(),
+    ):
+        await blocker.execute(select(Event.id).where(Event.id == event.id).with_for_update())
+        task = group.create_task(
+            client.post(
+                f"/api/events/{event.id}/registrations", json={"email": "waiting@example.test"}
+            )
+        )
+        # Observe the real server-side wait before probing unrelated requests.
+        async with business.engine.connect() as observer, asyncio.timeout(1.5):
+            while not await observer.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                    "AND cardinality(pg_blocking_pids(pid)) > 0)"
+                )
+            ):
+                await observer.execute(text("SELECT pg_stat_clear_snapshot()"))
+                await asyncio.sleep(0.01)
+            async with asyncio.timeout(1):
+                health = await client.get("/api/health")
+                detail = await client.get(f"/api/events/{event.id}")
+            assert health.status_code == detail.status_code == 200
+            assert detail.json()["confirmed"] == 0
+            assert not task.done()
+    assert task.result().status_code == 202
+    assert (await business.event(event.id)).confirmed == 1
+
+
+@pytest.mark.parametrize("error", [TimeoutError("private timeout"), OSError("private connection")])
+async def test_async_driver_connection_errors_return_503(
+    client: AsyncClient, business: Business, error: OSError, caplog: pytest.LogCaptureFixture
+) -> None:
+    event = await business.create()
+    with patch("app.api.events.registrations.register", side_effect=error):
+        response = await client.post(
+            f"/api/events/{event.id}/registrations", json={"email": "user@example.test"}
+        )
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "1"
+    assert response.json()["code"] == "database_unavailable"
+    assert str(error) not in response.text + caplog.text

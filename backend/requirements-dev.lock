@@ -21,6 +21,10 @@ anyio==4.15.1
     #   -c requirements.lock
     #   httpx
     #   starlette
+asyncpg==0.32.0
+    # via
+    #   -c requirements.lock
+    #   event-registration-backend (pyproject.toml)
 certifi==2026.10.19
     # via
     #   httpcore
@@ -86,14 +90,6 @@ pathspec==1.1.1
     # via mypy
 pluggy==1.7.0
     # via pytest
-psycopg==3.3.6
-    # via
-    #   -c requirements.lock
-    #   event-registration-backend (pyproject.toml)
-psycopg-binary==3.3.6
-    # via
-    #   -c requirements.lock
-    #   psycopg
 pydantic==2.14.1
     # via
     #   -c requirements.lock
@@ -134,7 +130,6 @@ typing-extensions==4.16.0
     #   fastapi
     #   mypy
     #   opentelemetry-api
-    #   psycopg
     #   pydantic
     #   pydantic-core
     #   pydantic-settings

@@ -12,6 +12,8 @@ annotated-types==0.8.0
     # via pydantic
 anyio==4.15.1
     # via starlette
+asyncpg==0.32.0
+    # via event-registration-backend (pyproject.toml)
 click==8.5.0
     # via uvicorn
 dnspython==2.9.0
@@ -34,10 +36,6 @@ markupsafe==3.0.4
     # via mako
 opentelemetry-api==1.45.1
     # via fastapi
-psycopg==3.3.6
-    # via event-registration-backend (pyproject.toml)
-psycopg-binary==3.3.6
-    # via psycopg
 pydantic==2.14.1
     # via
     #   fastapi
@@ -60,7 +58,6 @@ typing-extensions==4.16.0
     #   anyio
     #   fastapi
     #   opentelemetry-api
-    #   psycopg
     #   pydantic
     #   pydantic-core
     #   pydantic-settings
