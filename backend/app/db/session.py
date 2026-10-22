@@ -10,7 +10,10 @@ def build_engine(settings: Settings) -> Engine:
         isolation_level="READ COMMITTED",
         pool_pre_ping=True,
         hide_parameters=True,
-        connect_args={"connect_timeout": 3, "options": "-c statement_timeout=3000"},
+        connect_args={
+            "connect_timeout": 3,
+            "options": "-c lock_timeout=2000 -c statement_timeout=3000",
+        },
     )
 
 

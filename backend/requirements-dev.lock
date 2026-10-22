@@ -29,6 +29,14 @@ click==8.5.0
     # via
     #   -c requirements.lock
     #   uvicorn
+dnspython==2.9.0
+    # via
+    #   -c requirements.lock
+    #   email-validator
+email-validator==2.3.0
+    # via
+    #   -c requirements.lock
+    #   event-registration-backend (pyproject.toml)
 fastapi==0.150.0
     # via
     #   -c requirements.lock
@@ -50,6 +58,7 @@ idna==3.20
     # via
     #   -c requirements.lock
     #   anyio
+    #   email-validator
     #   httpx
 iniconfig==2.3.1
     # via pytest

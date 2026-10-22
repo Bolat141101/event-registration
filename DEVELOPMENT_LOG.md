@@ -112,3 +112,72 @@ SELECT version_num FROM alembic_version;
 ### Состояние после этого этапа
 
 Контрольная отметка: `2026-10-21T21:36:40+05:00`. В основной PostgreSQL проверены все имена/nullable колонок: events=5, registrations=9, email_outbox=10. Схема соответствует варианту 3. Доступны обновлённые Compose-сервисы, health/OpenAPI/frontend, ORM-нормализация и транзакционная функция номера очереди; полнофункциональная регистрация и обработка outbox ещё впереди. Тестовая БД после проверок остановлена, основные volumes сохранены. `git diff --check` и проверка пустого staged diff прошли; HEAD eb34b8c сохранён, 0001 неизменна. Добавлены три новых пока untracked файла: waitlist.py, 0002_simplify_schema.py, test_waitlist.py; обычный `git diff --stat` их не учитывает. Ошибок в выполненных проверках не осталось. Следующий этап не начат; commit/push не выполнены. После отчёта ожидается решение пользователя.
+
+## Backend-сервисы, HTTP и транзакционная постановка outbox — 2026-10-22
+
+Метки получены по текущим UTC-часам и переведены в Asia/Almaty. Вложения пользователя прочитаны до изменений. На этом этапе SMTP/SSE/UI не реализуются.
+
+| Время Алматы | Фактически выполнено | Результат |
+|---|---|---|
+| 2026-10-22T11:10:42+05:00 | Прочитано приложенное задание, проверены git status/diff и необходимые модели/сервисы/контракты | Рабочее дерево и staged diff пусты; HEAD 2649399 refactor db. Предыдущая схема и helper очереди уже сохранены пользователем; бизнес-сервисов нет |
+| 2026-10-22T11:11:12+05:00 | Сверены API/доступ/напоминания с архитектурой и manifests | Схема 24 колонки достаточна; решено не менять миграции, использовать существующий MAX helper и один event-lock |
+| 2026-10-22T11:17:29+05:00 | К этой отметке созданы сервисы, постановка outbox, HTTP/доступ и обработчики ошибок; начата установка email-validator и локальные проверки | Первичные замечания Ruff — формат/неиспользуемые импорты; Mypy до завершения установки сообщил об отсутствующем email_validator. Проверки после установки повторены успешно |
+| 2026-10-22T11:21:19+05:00 | Локальные Ruff/Mypy прошли; запущен первый PostgreSQL прогон с сервисными тестами | Реальные конкурентные транзакции, без worker и SQLite; подготовлены rollback/time/version/outbox проверки |
+| 2026-10-22T11:24:41+05:00 | Получен успешный первый прогон 67 тестов; добавлены HTTP и дополнительные конкурентные/временные проверки, запущен полный прогон | Все существующие тесты сохранены. Новые сценарии вызывают сервисы/API; prepared состояния задаются только как начальные фикстуры будущего sender |
+| 2026-10-22T11:27:00+05:00 | Обновлены README/ARCHITECTURE/REQUIREMENTS; получен результат расширенного прогона | 108 passed, 1 failed из 109: тест отката переноса сравнивал счётчик confirmed со снимком до регистрации. HTTP/доступ/реальный lock timeout прошли |
+| 2026-10-22T11:27:56+05:00 | Исправлен исходный снимок в тесте отката; fault injection усилен сбоем после flush outbox; повторён запуск всех тестов | Ruff/format/Mypy прошли. Проверены Compose config и отсутствие существующих volumes под новым именем smoke-проекта; никаких пользовательских volumes не удалено |
+| 2026-10-22T11:31:23+05:00 | Получен повторный полный результат, создано и запущено отдельное Compose-окружение с новыми volumes | 109 passed за 3.87s, 0 skipped. Изолированный проект event-registration-business-check-20261022, динамические host-порты, чистая PostgreSQL, migrate exit 0 |
+| 2026-10-22T11:32:48+05:00 | Завершён первый настоящий HTTP smoke через frontend proxy; контейнерные Ruff/format/Mypy прошли; отдельный CLI downgrade завершён, upgrade запущен | Создание/регистрация/FIFO/resume/перенос/чекин и коды 200/201/202/401/404/409/422 подтверждены. Итоговые счётчики 1/1/1, схема 24, по одному reminder на запись. SMTP не вызывается |
+| 2026-10-22T11:35:22+05:00 | CLI upgrade и check завершены, обычное окружение обновлено с сохранением данных; при ревью замечена утечка наличия email после начала | Команды exit 0. Различие 202 существующего / 409 нового адреса признано несогласованным с нейтральным ответом; принято убрать различие кодов, сохранив запрет вставки |
+| 2026-10-22T11:36:03+05:00 | Исправлен публичный ответ после начала, добавлен HTTP regression test, уточнены временные тесты и документация; запущен полный повтор | Новая поздняя регистрация не создаётся, ответ такой же нейтральный 202; Ruff/format/Mypy локально прошли. На этой отметке новый Pytest ещё выполнялся |
+| 2026-10-22T11:38:24+05:00 | Получен окончательный полный прогон после исправления приватности; повторный HTTP smoke запущен на свежей БД | 110 passed за 4.13s, без skip/xfail; Alembic check прошёл |
+| 2026-10-22T11:40:20+05:00 | Повторный HTTP smoke завершился успешно; Ruff/format/Mypy контейнера прошли; проверен обычный proxy после обновления | Выявлен отдельный HTTP 502 через Nginx при здоровом API, Alembic check основной БД прошёл. Тестовая БД остановлена; smoke-volumes удалялись только у созданного текущим этапом проекта |
+| 2026-10-22T11:41:09+05:00 | Причина 502 подтверждена логом: соединение со старым IP upstream; добавлен динамический Docker DNS resolver в Nginx | Изменение только nginx.conf, без пользовательских экранов. Прочитаны официальные Nginx proxy_pass/resolver; запущена пересборка и проверка |
+| 2026-10-22T11:42:36+05:00 | Пересборка/запуск обычного frontend завершились; nginx -t и HTTP health прошли; создано свежее изолированное окружение для регрессии proxy | Синтаксис OK, health 200 ok/ready. Backend после 110 passing tests не менялся; повторяются затронутые HTTP/Compose проверки |
+| 2026-10-22T11:45:05+05:00 | Проверено восстановление proxy после фактической смены IP API без пересоздания frontend; повторный полный HTTP smoke с новым Nginx запущен; основная схема проверена read-only | API IP в изолированном проекте изменился с 192.168.16.4 на 192.168.16.5, frontend container ID прежний, health 200. Основная БД: events=5, registrations=9, email_outbox=10, revision=0002 |
+
+### Команды и окончательные результаты backend-этапа
+
+Команды запускались из корня репозитория. Для контейнерных тестов TEST_DATABASE_URL указывает на PostgreSQL event_registration_test. В root test-db worker не запускался, обычный worker подключён к другой БД. Ни одна основная прикладная таблица не очищалась. Удалялись только новые volumes изолированного smoke-проекта, созданные текущим этапом.
+
+| Проверка | Реально выполненная команда | Результат |
+|---|---|---|
+| Ruff lint | `docker compose --profile test run --rm --no-deps test ruff check .` | PASS |
+| Ruff format | `docker compose --profile test run --rm --no-deps test ruff format --check .` | PASS, 40 Python-файлов |
+| Mypy | `docker compose --profile test run --rm --no-deps test mypy app` | PASS, 25 файлов |
+| Полный Pytest + upgrade/check | `docker compose --profile test run --rm --build test` | PASS, 110 tests за 4.13s: 102 integration + 8 unit; 0 skip/xfail. Внутри: alembic upgrade head && pytest && alembic check |
+| Отдельный CLI downgrade | `docker compose --profile test run --rm --no-deps test alembic downgrade base` | PASS на пустой отдельной тестовой БД |
+| Отдельный CLI upgrade | `docker compose --profile test run --rm --no-deps test alembic upgrade head` | PASS, обе прежние миграции |
+| Отдельный CLI check | `docker compose --profile test run --rm --no-deps test alembic check` | PASS, No new upgrade operations detected |
+| Check основной БД | `docker compose exec -T api alembic check` | PASS |
+| Compose config | `docker compose config --quiet` | PASS |
+| Сборка и старт обычного окружения | `docker compose up --build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend` | PASS; после обнаруженного stale-IP proxy исправлен и повторно собран frontend |
+| Применение исправленного proxy | `docker compose up --build -d --wait --wait-timeout 120 frontend` | PASS |
+| Nginx config | `docker compose exec -T frontend nginx -t` | PASS |
+| Обычный health, read-only | `curl --fail --silent --show-error http://127.0.0.1:8080/api/health` | Первоначально FAIL 502, причина исправлена; повтор PASS, ok/ready |
+| Изолированный build/start | `COMPOSE_PROJECT_NAME=event-registration-business-check-20261022 COMPOSE_ENV_FILES=.env.example POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0 docker compose up --build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend` | PASS с чистыми volumes; frontend TS/Vite слои переиспользованы из кэша, собственный новый typecheck в этом этапе не заявляется |
+| Настоящий HTTP smoke новых API | `COMPOSE_PROJECT_NAME=event-registration-business-check-20261022 COMPOSE_ENV_FILES=.env.example POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0 docker compose exec -T -e ALLOW_ISOLATED_SMOKE=yes api python - < /tmp/MadDevs-backend-smoke.py` | PASS всех новых маршрутов и ожидаемых 200/201/202/401/404/409/422; counter=1/1/1, один reminder на запись, два rescheduled для двух активных записей; SMTP не используется |
+| Регрессия proxy после API recreate | `COMPOSE_PROJECT_NAME=event-registration-business-check-20261022 COMPOSE_ENV_FILES=.env.example POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0 backend/.venv/bin/python /tmp/MadDevs-proxy-recovery.py` | PASS, реальная смена IP, frontend не перезапускался, health снова 200. Скрипт внутри выполняет compose up --no-build --no-deps -d --force-recreate --wait --wait-timeout 60 api worker |
+| Проверка diff/миграций | `git diff --check` и `git diff --exit-code HEAD -- backend/migrations backend/app/db/models.py backend/app/db/waitlist.py` | PASS, миграции/схема/helper не изменены |
+
+110 тестов включают 37 HTTP-проверок и 30 проверок бизнес-сервисов, плюс все 43 существовавших теста. Реальная конкуренция проверена отдельными транзакциями, ожидающими event-lock в PostgreSQL: последнее место, один нормализованный email, отмена против нового участника, две отмены, два resume, два чекина и чтение текущего времени после ожидания блокировки. Проверены FIFO A/B/C без worker, версии участия/переносов, rollback после записи outbox, prepared pending/sent без переписывания, late reminder, hash/доступ/валидация/отсутствие секретов в ответах и логах. Неподготовленный failed notice обновляется без автоматического retry.
+
+Схема по-прежнему 24 колонки, users не добавлена, новые миграции не потребовались. SMTP/MIME/retries отправки/SSE/полноценные экраны не реализованы намеренно по границам этапа. Нет полноценной авторизации/нескольких организаторов, recovery потерянного токена и отдельного idempotency key создания события. При неопределённом результате COMMIT нельзя гарантировать откат. GitHub Actions удалённо не запускался; команды CI выполнены локально в контейнерах. Коммитов/push нет.
+
+### Состояние после backend-этапа
+
+Контрольная отметка `2026-10-22T11:47:42+05:00`: все 110 тестов и требуемые проверки завершены успешно, исправленный proxy прошёл повторный полный HTTP smoke. Неисправленных ошибок выполненных проверок нет. Основные db/api/frontend/Mailpit healthy, worker запущен (собственного healthcheck нет), migrate exit 0. Выделенная test-db остановлена; все созданные этим этапом smoke-контейнеры/volumes удалены, пользовательские volumes сохранены. Схема/миграции/существующий MAX-helper не изменены. git diff --check и пустой staged diff проверены, HEAD 2649399 сохранён. Добавлены 18 новых пока untracked файлов; обычный git diff --stat их не учитывает. Коммитов/push нет, следующий этап не начат. SMTP/SSE/UI остаются отдельно согласуемой работой.
+
+## Исправление граничных дат и U+0000 — 2026-10-22
+
+| Время Алматы | Фактически выполнено | Результат |
+|---|---|---|
+| 2026-10-22T12:18:34+05:00 | Проверены status/diff и существующий незакоммиченный backend-этап; прочитаны UTC-преобразование, схемы ввода, API-тесты и README | Существующие изменения сохранены. Причины ошибок: OverflowError в astimezone и отсутствие проверки NUL в описании |
+| 2026-10-22T12:21:04+05:00 | Добавлены UTCDateTime с AfterValidator(as_utc), преобразование OverflowError в ValueError и проверка U+0000 в API/сервисе; добавлены семь API-регрессий и исправлен README | Верхняя/нижняя границы для create и schedule отклоняются до сервиса; ошибочный перенос не меняет событие/версию/outbox. Замечание Ruff по длине строки исправлено форматтером; Ruff/format/Mypy повторены успешно |
+| 2026-10-22T12:21:54+05:00 | Получен результат полного прогона на отдельной PostgreSQL с актуальными app/tests в read-only mount; проверены diff и неизменность моделей/миграций | 117 passed за 4.38s, без skip/xfail; Alembic check: No new upgrade operations detected. Основная БД и volumes не затронуты |
+
+Команды Ruff/Mypy выполнены из backend: `.venv/bin/ruff check .` — PASS; `.venv/bin/ruff format --check .` — PASS (40 файлов); `.venv/bin/mypy app` — PASS (25 файлов).
+
+Полный PostgreSQL-прогон из корня: `docker compose --profile test run --rm --volume /Users/billcarter/Documents/MadDevs/backend/app:/app/app:ro --volume /Users/billcarter/Documents/MadDevs/backend/tests:/app/tests:ro test`. Использован существующий test-образ с прежними зависимостями и текущими исходниками; внутри выполнены `alembic upgrade head && pytest && alembic check`. Тесты работают только с event_registration_test; тестовая БД затем останавливается, команды удаления volumes не используются.
+
+README больше не относит регистрацию/FIFO/чекин к будущим задачам, описывает реализованные services/outbox и оставшиеся SMTP/SSE/экраны. API возвращает validation_error/422 для `0001-01-01T00:00:00+01:00`, `9999-12-31T23:59:59-01:00` и описаний с NUL; бизнес-сервис не вызывается. Схема/миграции/зависимости не менялись, commit/push не выполнялись.
