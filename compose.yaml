@@ -6,11 +6,26 @@ x-backend: &backend
     context: ./backend
     target: runtime
   environment: &backend-environment
-    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-events}:${POSTGRES_PASSWORD:?Copy .env.example to .env}@db:5432/${POSTGRES_DB:-event_registration}
+    DATABASE_URL: postgresql+asyncpg://${CORE_DB_USER:-core_app}:${CORE_DB_PASSWORD:-local_core_password_change_me}@db:5432/${POSTGRES_DB:-event_registration}
     ORGANIZER_TOKEN: ${ORGANIZER_TOKEN:?Set ORGANIZER_TOKEN in .env}
     SMTP_HOST: mailpit
     SMTP_PORT: "1025"
     SMTP_FROM: events@example.test
+
+x-bootstrap: &bootstrap
+  image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+  entrypoint: ["/bin/sh", "/bootstrap/bootstrap.sh"]
+  volumes:
+    - ./infrastructure/postgres:/bootstrap:ro
+  restart: "no"
+
+x-notifications: &notifications
+  image: event-notifications:local
+  build:
+    context: ./notifications
+    target: runtime
+  environment:
+    DATABASE_URL: postgresql+asyncpg://${NOTIFICATIONS_DB_USER:-notifications_app}:${NOTIFICATIONS_DB_PASSWORD:-local_notifications_password_change_me}@db:5432/${NOTIFICATIONS_DB:-event_notifications}
 
 services:
   db:
@@ -30,13 +45,54 @@ services:
       retries: 30
     restart: unless-stopped
 
+  db-bootstrap:
+    <<: *bootstrap
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-events}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Copy .env.example to .env}
+      CORE_DB: ${POSTGRES_DB:-event_registration}
+      CORE_USER: ${CORE_DB_USER:-core_app}
+      CORE_PASSWORD: ${CORE_DB_PASSWORD:-local_core_password_change_me}
+      NOTIFICATIONS_DB: ${NOTIFICATIONS_DB:-event_notifications}
+      NOTIFICATIONS_USER: ${NOTIFICATIONS_DB_USER:-notifications_app}
+      NOTIFICATIONS_PASSWORD: ${NOTIFICATIONS_DB_PASSWORD:-local_notifications_password_change_me}
+    depends_on:
+      db:
+        condition: service_healthy
+
   migrate:
     <<: *backend
     command: ["alembic", "upgrade", "head"]
     depends_on:
-      db:
-        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
     restart: "no"
+
+  notifications-migrate:
+    <<: *notifications
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    restart: "no"
+
+  notifications:
+    <<: *notifications
+    depends_on:
+      notifications-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
 
   api:
     <<: *backend
@@ -122,13 +178,62 @@ services:
       context: ./backend
       target: test
     environment:
-      DATABASE_URL: postgresql+asyncpg://events_test:test_database_password_local_only@test-db:5432/event_registration_test
-      TEST_DATABASE_URL: postgresql+asyncpg://events_test:test_database_password_local_only@test-db:5432/event_registration_test
+      DATABASE_URL: postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test
+      TEST_DATABASE_URL: postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test
       ORGANIZER_TOKEN: test_organizer_token_32_characters_minimum
     command: ["sh", "-c", "alembic upgrade head && pytest && alembic check"]
     depends_on:
+      test-db-bootstrap:
+        condition: service_completed_successfully
+
+  test-db-bootstrap:
+    <<: *bootstrap
+    profiles: ["test"]
+    environment: &test-bootstrap-environment
+      PGHOST: test-db
+      PGUSER: events_test
+      PGPASSWORD: test_database_password_local_only
+      CORE_DB: event_registration_test
+      CORE_USER: core_app_test
+      CORE_PASSWORD: core_database_password_local_only
+      NOTIFICATIONS_DB: event_notifications_test
+      NOTIFICATIONS_USER: notifications_app_test
+      NOTIFICATIONS_PASSWORD: notifications_database_password_local_only
+    depends_on:
       test-db:
         condition: service_healthy
+
+  notifications-test:
+    profiles: ["test"]
+    build:
+      context: ./notifications
+      target: test
+    environment:
+      DATABASE_URL: postgresql+asyncpg://notifications_app_test:notifications_database_password_local_only@test-db:5432/event_notifications_test
+      TEST_DATABASE_URL: postgresql+asyncpg://notifications_app_test:notifications_database_password_local_only@test-db:5432/event_notifications_test
+      TEST_CORE_DATABASE_URL: postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test
+    command: ["sh", "-c", "alembic upgrade head && pytest && alembic check"]
+    depends_on:
+      test-db-bootstrap:
+        condition: service_completed_successfully
+
+  bootstrap-test:
+    profiles: ["test"]
+    build:
+      context: ./backend
+      target: bootstrap-test
+    environment:
+      <<: *test-bootstrap-environment
+      TEST_CORE_DATABASE_URL: postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test
+      TEST_NOTIFICATIONS_DATABASE_URL: postgresql+asyncpg://notifications_app_test:notifications_database_password_local_only@test-db:5432/event_notifications_test
+    volumes:
+      - ./infrastructure/postgres:/bootstrap:ro
+      - ./infrastructure/tests:/bootstrap-tests:ro
+      - ./notifications:/notifications:ro
+    command: ["pytest", "-c", "/app/pyproject.toml", "/bootstrap-tests"]
+    depends_on:
+      test-db-bootstrap:
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:

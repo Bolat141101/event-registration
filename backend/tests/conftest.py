@@ -2,6 +2,7 @@ import os
 from collections.abc import AsyncIterator
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
@@ -30,6 +31,19 @@ async def integration_engine() -> AsyncIterator[AsyncEngine]:
         pytest.fail("Integration tests require the asyncpg driver")
     engine = create_async_engine(url, isolation_level="READ COMMITTED", hide_parameters=True)
     try:
+        async with engine.connect() as connection:
+            role = (
+                await connection.execute(
+                    text(
+                        "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, "
+                        "rolreplication, rolbypassrls, "
+                        "EXISTS (SELECT 1 FROM pg_auth_members WHERE member = r.oid) "
+                        "AS has_membership FROM pg_roles r WHERE rolname = current_user"
+                    )
+                )
+            ).one()
+            if role.rolname != "core_app_test" or any(role[1:]):
+                pytest.fail("Core integration tests require unprivileged core_app_test")
         yield engine
     finally:
         await engine.dispose()

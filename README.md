@@ -7,16 +7,22 @@
 Реализованы инфраструктура, схема и backend бизнес-операции:
 
 - Асинхронный FastAPI API мероприятий, публичная регистрация, приватное управление участием и чекин;
-- три таблицы, 24 колонки, PostgreSQL READ COMMITTED и блокировка строки события;
+- три таблицы Core, 24 колонки, PostgreSQL READ COMMITTED и блокировка строки события;
 - конкурентное распределение последнего места и FIFO-продвижение внутри отмены;
 - отмена и resume с номером участия, непредсказуемые билеты и токены, хранение hash токена;
 - общий Bearer-ключ организатора; приватные действия по Bearer-токену участника;
 - согласованные счётчики confirmed/waitlisted/checked_in одним SQL-снимком;
 - транзакционная постановка ticket/waitlist/reminder/rescheduled в outbox;
 - версии переносов, идемпотентные повторы, неизменность prepared-писем;
-- инфраструктурный worker, Mailpit, health, production-сборка React и CI.
+- инфраструктурный worker Core, отдельный каркас Notifications с собственной БД/ролью, Mailpit, два healthcheck, production-сборка React и CI.
 
-**Письма пока не отправляются.** Worker только проверяет БД; SMTP, подготовка MIME, retries отправки, SSE и полноценные экраны остаются следующими этапами. Токен новой регистрации находится в первом ticket/waitlist payload outbox и публичным API не возвращается. Для текущих backend-проверок он читается только в изолированных тестах; обычный пользовательский путь через email появится на следующем этапе. Наличие заданий не означает доставку писем.
+**Письма пока не отправляются.** Core worker только проверяет свою БД, Notifications предоставляет только `/health` и таблицу заданий; HTTP relay, SMTP, подготовка MIME, retries отправки, SSE и полноценные экраны остаются следующими этапами. Токен новой регистрации находится в первом ticket/waitlist payload outbox и публичным API не возвращается. Для текущих backend-проверок он читается только в изолированных тестах; обычный пользовательский путь через email появится на следующем этапе. Наличие заданий не означает доставку писем.
+
+## Core + Notifications
+
+Один PostgreSQL обслуживает event_registration/core_app и event_notifications/notifications_app. Core хранит бизнес-данные и outbox; Notifications имеет отдельный проект/миграции и notification_jobs (7 колонок, nullable MIME). Core не зависит от доступности процесса Notifications. Согласованная следующая граница: Core фиксирует неизменяемый payload, Notifications формирует и сохраняет MIME. Приём заданий, формирование MIME и SMTP ещё не реализованы.
+
+`db-bootstrap` работает с существующим volume: создаёт отсутствующую вторую БД/обычные роли, изолирует доступ и адресно передаёт владельцев таблиц без изменения строк. POSTGRES_USER остаётся техническим администратором, не пользователем API. Подробные настройки, обновление и проверки — [docs/NOTIFICATIONS_INFRASTRUCTURE.md](docs/NOTIFICATIONS_INFRASTRUCTURE.md).
 
 ## API текущего этапа
 
@@ -75,9 +81,9 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Если `.env` уже существует, сохраните его вместо повторного копирования. В `.env` замените локальные примерные `POSTGRES_PASSWORD` и `ORGANIZER_TOKEN` (минимум 32 символа). Для текущей сборки DATABASE_URL из Compose используйте в пароле URI-safe символы: латинские буквы, цифры, `-`, `_`. Сложные URL-пароли потребуют отдельного URL-encoding; `.env` не коммитится. Эти ключи предназначены для локальной разработки, не для публикации сервиса.
+Если `.env` уже существует, сохраните его вместо повторного копирования. В `.env` задайте отдельные `CORE_DB_PASSWORD` и `NOTIFICATIONS_DB_PASSWORD`, замените локальные примерные `POSTGRES_PASSWORD` и `ORGANIZER_TOKEN` (минимум 32 символа). Для текущей сборки DATABASE_URL из Compose используйте в пароле URI-safe символы: латинские буквы, цифры, `-`, `_`. Сложные URL-пароли потребуют отдельного URL-encoding; `.env` не коммитится. Эти ключи предназначены для локальной разработки, не для публикации сервиса.
 
-Compose ждёт готовности PostgreSQL, запускает `alembic upgrade head`, затем API и worker; frontend ждёт health API. Таблицы вручную создавать не нужно. Успешное завершение `migrate` с кодом 0 — штатное поведение одноразового контейнера.
+Compose ждёт готовности PostgreSQL, выполняет db-bootstrap, запускает независимые миграции Core и Notifications, затем API/worker и Notifications; frontend ждёт только health Core. Таблицы вручную создавать не нужно. Успешное завершение `migrate` с кодом 0 — штатное поведение одноразового контейнера.
 
 - Приложение: [http://localhost:8080](http://localhost:8080).
 - Health: [http://localhost:8080/api/health](http://localhost:8080/api/health).
@@ -97,7 +103,7 @@ Compose ждёт готовности PostgreSQL, запускает `alembic up
 Логи и управление:
 
 ```sh
-docker compose logs --tail=100 api migrate worker mailpit
+docker compose logs --tail=100 api migrate worker notifications notifications-migrate db-bootstrap mailpit
 docker compose restart api worker
 docker compose down
 ```
@@ -109,14 +115,18 @@ docker compose down
 Основной вариант — полностью в Docker:
 
 ```sh
-docker compose --profile test build test
+docker compose --profile test build test notifications-test bootstrap-test
 docker compose --profile test run --rm test
+docker compose --profile test run --rm notifications-test
+docker compose --profile test run --rm bootstrap-test
 docker compose --profile test run --rm --no-deps test ruff check .
 docker compose --profile test run --rm --no-deps test ruff format --check .
 docker compose --profile test run --rm --no-deps test mypy app
 ```
 
-`test` поднимает отдельный `test-db`, применяет миграцию, выполняет Pytest и `alembic check`. Используется PostgreSQL, не SQLite. Тестовая БД не имеет опубликованного порта, хранится в tmpfs и не использует volume приложения. В тестах round-trip миграции выполняется downgrade/upgrade **только в БД с именем, заканчивающимся на `_test`**; не задавайте TEST_DATABASE_URL основной БД.
+`test` поднимает отдельный `test-db`, дожидается `test-db-bootstrap`, применяет миграции, выполняет Pytest и `alembic check` под обычной ролью `core_app_test`. Фикстура отклоняет административную роль и членство в других ролях. Используется PostgreSQL, не SQLite. Тестовая БД не имеет опубликованного порта, хранится в tmpfs и не использует volume приложения. В тестах round-trip миграции выполняется downgrade/upgrade **только в БД с именем, заканчивающимся на `_test`**; не задавайте TEST_DATABASE_URL основной БД.
+
+`bootstrap-test` — отдельный инфраструктурный тест настоящего `bootstrap.sh`: заполнение обеих БД, два повторных запуска, полное сравнение строк, MIME/payload, версий Alembic, владельцев/ACL, индексов и ограничений. Также проверяются прикладные права и реальные отказы подключения к чужой БД с SQLSTATE 42501. Административные учётные данные нужны только bootstrap-контейнерам; Core/Notifications тесты их не получают. Запускайте три набора последовательно: тесты миграций изменяют схему. Подробности — [Notifications infrastructure](docs/NOTIFICATIONS_INFRASTRUCTURE.md).
 
 Проверяются конфигурация/секреты, ответы health, миграции вверх/вниз и соответствие моделям, типизированные даты, уникальность event/email и FIFO-позиции, недопустимые состояния регистрации, уникальность outbox и совместный rollback регистрации/задания. Дополнительно проверяются реальные сервисы/API и конкурентные запросы на PostgreSQL: последнее место, одинаковый email, отмена с новым участником, повторная отмена, resume, чекин и время после ожидания блокировки. В тестах отдельные asyncio-задачи с собственными сессиями одновременно ждут event-lock; наблюдатель проверяет реальные pg_blocking_pids. Также проверяются доступность health/чтения во время блокировки, rollback регистрации/outbox и освобождение lock при отмене задачи, ошибки подключения asyncpg. Регистрация на последнее место и однократный чекин дополнительно проверяются через два независимых Uvicorn-процесса с настоящими HTTP-запросами и отдельными пулами БД; до снятия event-lock наблюдатель подтверждает ожидание двух транзакций. Worker отправки не запускается.
 
@@ -134,9 +144,10 @@ Workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) запускает
 
 1. Валидацию Compose и сборку backend/test из существующих Dockerfile и lock-файлов.
 2. Ruff (включая форматирование), Mypy и весь Pytest без исключения интеграционных тестов.
-3. Миграции Alembic на настоящем PostgreSQL: upgrade, тест downgrade/upgrade и `alembic check`.
-4. Сборку frontend: Dockerfile запускает `npm ci` и `npm run build`, который включает TypeScript typecheck и Vite.
-5. Запуск приложения с новой БД/volumes и проверку точного JSON `/api/health` через frontend proxy.
+3. Независимые Ruff/format/Mypy/Pytest Notifications, изоляцию ролей и миграции обоих проектов на настоящем PostgreSQL: upgrade, тест downgrade/upgrade и `alembic check`. Все Core-тесты выполняются под `core_app_test`, Notifications — под `notifications_app_test`.
+4. Отдельные Ruff/format/Mypy и интеграционный тест повторного bootstrap с данными в обеих тестовых БД, контролем владельцев/прав и запрета доступа между сервисами.
+5. Сборку frontend: Dockerfile запускает `npm ci` и `npm run build`, который включает TypeScript typecheck и Vite.
+6. Запуск приложения с новыми БД/volumes, проверки обоих health и независимости Core при остановленном Notifications.
 
 Используется отдельный Compose-проект `event-registration-ci` и `.env.example`; настоящие секреты и дополнительные сервисы GitHub не нужны. Все три опубликованных порта устанавливаются в `0`, Docker выбирает свободные; адрес frontend берётся через `docker compose port`. Это позволяет выполнять те же команды рядом с обычным локальным приложением. Worker/Redis/Celery дополнительно не вводятся.
 
@@ -146,11 +157,11 @@ Workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) запускает
 
 ## Структура и дальнейшие шаги
 
-`backend/app/api` содержит HTTP, `services` — реализованные бизнес-операции, `db` — SQLAlchemy и соединения, `notifications` — реализованную постановку outbox и будущую подготовку/отправку. Доменные операции не вызывают SMTP и не зависят от способа выбора заданий worker. Пустой исходный `main.py` в корне не используется; точка входа API находится в `backend/app/main.py`.
+`backend/app/api` содержит HTTP, `services` — реализованные бизнес-операции, `db` — SQLAlchemy и соединения, `notifications` внутри backend — реализованную постановку outbox и будущую фиксацию payload. Отдельный проект `notifications/` содержит инфраструктуру будущего приёма, формирования MIME и SMTP. Доменные операции не вызывают SMTP и не зависят от способа выбора заданий worker. Пустой исходный `main.py` в корне не используется; точка входа API находится в `backend/app/main.py`.
 
-Далее: подготовка MIME и отправка outbox с проверками сбоя после SMTP accept, доставка уже поставленных напоминаний и уведомлений о переносе; пользовательские экраны и SSE; финальная проверка, описание улучшений и отдельное ESSAY.md из 10 предложений. Регистрация, FIFO, чекин и транзакционная постановка уведомлений уже реализованы и покрыты тестами. Обязательные пункты PDF сохранены в REQUIREMENTS.md.
+Далее: HTTP relay неизменяемого payload и идемпотентный приём в Notifications, формирование/фиксация MIME в Notifications и SMTP с проверками сбоя после SMTP accept, доставка уже поставленных напоминаний и уведомлений о переносе; пользовательские экраны и SSE; финальная проверка, описание улучшений и отдельное ESSAY.md из 10 предложений. Регистрация, FIFO, чекин и транзакционная постановка уведомлений уже реализованы и покрыты тестами. Обязательные пункты PDF сохранены в REQUIREMENTS.md.
 
-Сейчас разрешён ровно один worker. Для будущего роста предусмотрен [план конкурентной обработки](docs/WORKER_EVOLUTION.md): `FOR UPDATE SKIP LOCKED`, leases и идемпотентность добавляются в выбор/завершение outbox-задач. Регистрация и FIFO при этом остаются в прежних транзакциях. Эти механизмы, Redis и Celery сейчас не реализованы.
+Сейчас работает один инфраструктурный worker Core; Notifications не имеет отправителя. Будущий relay и SMTP-отправитель будут последовательными, по одному экземпляру каждого. Для будущего роста предусмотрен [план конкурентной обработки](docs/WORKER_EVOLUTION.md): `FOR UPDATE SKIP LOCKED`, leases и идемпотентность добавляются в выбор/завершение outbox-задач. Регистрация и FIFO при этом остаются в прежних транзакциях. Эти механизмы, Redis и Celery сейчас не реализованы.
 
 ## Решения, происхождение и AI
 

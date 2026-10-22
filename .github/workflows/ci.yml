@@ -39,7 +39,7 @@ jobs:
         run: docker compose config --quiet
 
       - name: Build backend and test images
-        run: docker compose build api test
+        run: docker compose build api test notifications notifications-test bootstrap-test
 
       - name: Ruff
         run: |
@@ -47,16 +47,30 @@ jobs:
           docker compose run --rm --no-deps test ruff format --check .
 
       - name: Mypy
-        run: docker compose run --rm --no-deps test mypy app
+        run: docker compose run --rm --no-deps test mypy app tests/conftest.py
 
-      - name: Alembic migrations and full Pytest suite on PostgreSQL
+      - name: Core migrations and full Pytest suite as unprivileged core_app_test
         run: docker compose run --rm test
+
+      - name: Notifications lint, types, PostgreSQL migrations and tests
+        run: |
+          docker compose run --rm --no-deps notifications-test ruff check .
+          docker compose run --rm --no-deps notifications-test ruff format --check .
+          docker compose run --rm --no-deps notifications-test mypy notifications_app
+          docker compose run --rm notifications-test
+
+      - name: Repeat bootstrap with persisted test data and verify database isolation
+        run: |
+          docker compose run --rm --no-deps bootstrap-test ruff check --config /app/pyproject.toml /bootstrap-tests
+          docker compose run --rm --no-deps bootstrap-test ruff format --check --config /app/pyproject.toml /bootstrap-tests
+          docker compose run --rm --no-deps bootstrap-test mypy --config-file /app/pyproject.toml /bootstrap-tests
+          docker compose run --rm bootstrap-test
 
       - name: TypeScript and Vite production build
         run: docker compose build frontend
 
       - name: Start Compose services and apply application migrations
-        run: docker compose up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend
+        run: docker compose up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications
 
       - name: Verify API health through frontend proxy
         run: |
@@ -64,6 +78,15 @@ jobs:
           curl --fail --silent --show-error --retry 5 --retry-connrefused \
             --retry-delay 2 --max-time 10 "http://${address}/api/health" \
             | python3 -c 'import json, sys; body = json.load(sys.stdin); assert body == {"status": "ok", "database": "ready"}, body; print(body)'
+
+      - name: Verify Notifications readiness and Core independence
+        run: |
+          docker compose exec -T notifications python -c 'import json, urllib.request; body = json.load(urllib.request.urlopen("http://localhost:8000/health", timeout=5)); assert body == {"status": "ok", "database": "ready"}, body'
+          docker compose stop notifications
+          address=$(docker compose port frontend 80)
+          curl --fail --silent --show-error --max-time 10 "http://${address}/api/health"
+          curl --fail --silent --show-error --max-time 10 "http://${address}/api/events"
+          docker compose up --no-build --no-deps -d --wait --wait-timeout 60 notifications
 
       - name: Show Compose diagnostics on failure
         if: failure()

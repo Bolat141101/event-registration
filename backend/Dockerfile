@@ -20,3 +20,12 @@ ENV PYTEST_ADDOPTS="-o cache_dir=/tmp/pytest_cache" \
     RUFF_CACHE_DIR=/tmp/ruff_cache MYPY_CACHE_DIR=/tmp/mypy_cache
 USER app
 CMD ["pytest"]
+
+# Only the infrastructure regression test needs psql to execute the real bootstrap.
+# The Core runtime and its ordinary test image do not include this administrative client.
+FROM test AS bootstrap-test
+USER root
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+USER app

@@ -155,3 +155,35 @@
 | Временные ошибки подключения asyncpg сохраняют 503 без секретов | asyncpg может выдавать OSError/TimeoutError до SQLAlchemy DBAPI wrapper | API/health регрессии ошибок соединения, настоящий lock timeout |
 
 Основание для адаптации: [SQLAlchemy asyncio](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html), [Alembic asyncio cookbook](https://alembic.sqlalchemy.org/en/latest/cookbook.html#using-asyncio-with-alembic), [SQLAlchemy asyncpg dialect](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#asyncpg). `run_sync` не используется как обход асинхронности бизнес-сервисов.
+
+## Инфраструктурное разделение Core + Notifications — 2026-10-22
+
+Контрольная отметка: `2026-10-22T22:42:22+05:00`. Пользователь разрешил только инфраструктуру и уточнил владение: Core — бизнес-данные и неизменяемый payload, Notifications — будущее формирование/сохранение MIME. Это заменяет вариант подготовки MIME в Core, обсуждавшийся в архитектурном предложении; он не внедрялся.
+
+| Решение | Причина / компромисс | Фактическая проверка |
+|---|---|---|
+| Существующий backend/frontend сохраняются; Notifications — отдельный проект с namespace notifications_app | Нет переноса бизнес-кода, общего ORM или дублирования правил участия; свои зависимости/миграции/тесты | SHA256 всех tracked backend/frontend файлов и OpenAPI совпадают с началом этапа |
+| Один PostgreSQL, две прикладные БД и обычные роли | Минимум контейнеров, запрет доступа к чужим данным; общий сбой PostgreSQL затронет оба сервиса | Реальные подключения в обоих направлениях отклонены с 42501; rolsuper/createdb/createrole/replication/bypassrls=false |
+| Прежний POSTGRES_USER — только технический администратор | До этапа Core использовал суперпользователя events; Core/worker/migrate переведены на core_app без изменения кода | Все 129 Core тестов дополнительно прошли под core_app_test |
+| Отдельный повторяемый db-bootstrap вместо initdb.d | Init-скрипты не обновляют существующий PGDATA; SQL-quoting через psql format, адресное ALTER OWNER без изменения строк | Заполненные Core и Notifications сохранены после первого/повторного bootstrap; PostgreSQL container/volume прежние |
+| notification_jobs: id, payload, mime nullable, status, attempts, available_at, last_error | Семь колонок, без преждевременного аудита/leases/recipient-колонок. MIME будет записан будущим обработчиком один раз; текущая схема не обеспечивает всю бизнес-идемпотентность/неизменность | PostgreSQL constraints, уникальность внешнего UUID, payload/MIME round-trip и rollback |
+| Только Notifications GET /health | Никакого HTTP relay/приёма заданий, SMTP или UI до следующего разрешения. Readiness проверяет только свою revision/БД; ошибка подключения возвращает 503 без DSN | Unit и реальные DB health-тесты, в том числе чужая/отсутствующая БД и неверный пароль |
+| Core не зависит от процесса Notifications | Доступность бизнес-операций сохраняется; outbox не передаётся в другой сервис на этом этапе | На изолированном стеке при остановленном Notifications через HTTP созданы событие/две регистрации/FIFO/четыре outbox-задания; основная установка health/events=200 |
+| Новая миграция только Notifications, Core revision остаётся 0002 | Ничего не добавляем в Core outbox до этапа relay; forwarded не реализован | Alembic check обоих проектов; Notifications downgrade запрещён на непустой таблице |
+| Существующий CI расширен, Core/frontend проверки сохранены | Свои lint/format/Mypy/Pytest и миграции Notifications; startup/readiness и stop-service independence | Команды выполнены локально; удалённый GitHub Actions не запускался |
+
+Операционные детали и ограничения — [docs/NOTIFICATIONS_INFRASTRUCTURE.md](docs/NOTIFICATIONS_INFRASTRUCTURE.md). Не реализованы приём заданий, фиксация payload/MIME, sender/retries, Kafka, Redis, новый UI и SSE. Добавление колонок не объявляется реализацией этих функций.
+
+## Обычная роль Core в CI и автоматическая проверка bootstrap — 2026-10-22
+
+Контрольная отметка: `2026-10-22T23:09:28+05:00`. Изменение разрешено прямым запросом пользователя; основная установка и volumes не используются.
+
+| Решение | Причина / компромисс | Проверка |
+|---|---|---|
+| Core test использует core_app_test и зависит от test-db-bootstrap | Администратор больше не скрывает недостаток прав обычной прикладной роли; владелец собственной БД сохраняет необходимые DDL-права для миграций | Полный Pytest и Alembic upgrade/downgrade/check; фикстура проверяет имя роли, флаги и членство |
+| Отдельный bootstrap-test вместо административных credentials в Core test | Bootstrap должен создавать БД/роли; прикладные тесты не должны иметь эти возможности | Только test-db в tmpfs, точные имена тестовых БД/ролей, без Docker socket и основных volumes |
+| Повторно вызывается настоящий shell/psql bootstrap, не копия SQL | Проверяется вся существующая последовательность скриптов; psql требуется в дополнительном test-only Docker target | Два повтора с данными: строки обеих БД, payload/MIME, Alembic, владельцы/ACL, индексы/constraints, реальные отказы 42501 |
+| Использованы существующие Python-зависимости Core test | Нет отдельного стека тестирования инфраструктуры; исходники миграций Notifications подключены read-only | Ruff/format и strict Mypy инфраструктурного теста; миграции обоих проектов под обычными ролями |
+| Три Pytest-набора выполняются последовательно | Миграционные тесты изменяют схему, параллельный запуск на одном test-db был бы некорректен | Core → Notifications → bootstrap-test в CI |
+
+Тест проверяет повторяемость на уже заполненных БД в работающем PostgreSQL. Перезапуск/авария самого PostgreSQL, атомарность CREATE DATABASE всего кластера и сбой в середине bootstrap этим тестом не моделируются. Бизнес-логика, схема и прежние миграции не менялись.

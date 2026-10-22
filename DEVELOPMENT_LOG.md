@@ -268,3 +268,100 @@ README больше не относит регистрацию/FIFO/чекин �
 Запускался только test-db из отдельного проекта в tmpfs. Основная PostgreSQL, её данные и volumes не использовались. Существующие незакоммиченные изменения не откатывались; Git add/commit/push не выполнялись. Новый test_api_processes.py пока untracked и не входит в обычный git diff --stat; его статистика выводится отдельно через git diff --no-index /dev/null.
 
 Дополнительная контрольная отметка `2026-10-22T17:17:57+05:00`: часы двух API-процессов разнесены на одну секунду. Тест теперь сравнивает checked_in_at с часами именно выигравшего процесса, затем проверяет отсутствие перезаписи после проигравшего и повторных запросов. После изменения снова выполнены Ruff, format, Mypy и полный PostgreSQL-прогон той же командой: **129 passed за 8.73s**, без skip/xfail, Alembic check — No new upgrade operations detected. SHA256 services/db/migrations повторно совпали. Это окончательный результат текущего запроса; прежние прогоны 10.24s/9.81s сохранены выше как история.
+
+## Инфраструктурное разделение Core + Notifications — 2026-10-22
+
+Разрешение пользователя: только инфраструктура. Core — бизнес-данные/неизменяемый payload; Notifications в дальнейшем формирует и сохраняет MIME. HTTP relay, приём заданий, SMTP и новый UI не реализовывать. Исходное рабочее дерево чистое; HEAD `6c20757`. Все tracked backend/frontend файлы и OpenAPI сохранены в контрольных SHA256/JSON до правок.
+
+| Время Алматы | Фактически выполнено к контрольной отметке | Результат |
+|---|---|---|
+| 2026-10-22T22:24:48+05:00 | Проверены status/diff, Compose, Core, Alembic, существующие тесты/CI и runtime-роли | Core использовал суперпользователя events. Выбран отдельный bootstrap и две обычные роли; исходный volume не пересоздаётся |
+| 2026-10-22T22:31:02+05:00 | Созданы Notifications, его модель/миграция/тесты, bootstrap и Compose; зафиксированы собственные зависимости на прежних проверенных версиях | Локальные Ruff/format/Mypy Notifications прошли. Начаты сборка образов и полный Core Pytest |
+| 2026-10-22T22:33:48+05:00 | Получены первые полные результаты; сохранены приватные дампы/хеши основной БД; подготовлена заполненная изолированная Core DB | Core: 129 passed за 9.09s, Alembic check PASS. Notifications: 21 passed за 0.86s. Основная БД на момент снимка имела 0 строк; поэтому сохранение непустых данных дополнительно проверялось на отдельном постоянном volume |
+| 2026-10-22T22:35:34+05:00 | Проверен Core под обычной ролью и повторный bootstrap с заполненными обеими БД; после дампа bootstrap применён к основной установке | Core: 129 passed за 13.64s под core_app_test. В изолированной БД до изменения владельцев: 2 events, 4 registrations, 5 outbox, включая версии/очередь/билеты/чекин/payload и ошибки; после первого и повторного bootstrap все хеши совпали. Notifications payload/MIME также сохранены. PostgreSQL container/volume прежние |
+| 2026-10-22T22:36:56+05:00 | Оба сервиса запущены на основном существующем volume; выполнены реальные проверки ролей/изоляции/head/check и независимости Core | core_app/event_registration и notifications_app/event_notifications: обе непривилегированные; чужое подключение=42501. Core head=0002, Notifications head=0001, оба check PASS. Core health/events=200 при остановленном Notifications. На изолированном стеке в этом состоянии через HTTP созданы событие, confirmed+waitlisted и четыре pending outbox |
+| 2026-10-22T22:41:22+05:00 | Дополнительные реальные health-тесты выявили raw asyncpg ошибки; после исправления обнаружен конфликт имён двух test_health.py при collection | Исходный точечный результат: own=PASS, чужая/отсутствующая БД/неверный пароль — 3 FAIL. Health Notifications исправлен: любая ошибка собственного readiness-подключения даёт 503, логируется только имя класса. Конфликт collection устранён обычными tests-пакетами __init__.py; тесты не удалялись/не отключались |
+| 2026-10-22T22:42:22+05:00 | Все Notifications-тесты повторены после исправлений, собран окончательный test image; проверены SHA256/Core OpenAPI | 25 passed за 0.71s, Alembic check без расхождений. Весь Core/frontend и старые миграции побайтно прежние, OpenAPI совпал |
+| 2026-10-22T22:43:55+05:00 | Штатный прогон окончательного Notifications image без bind mounts, контейнерные lint/types и свежие TS/Vite завершены; основная установка обновлена исправленным Notifications | 25 passed за 1.51s; Ruff/format/Mypy PASS (Notifications 18 Python-файлов, app=6). Core Ruff/format/Mypy также PASS (41/25). Vite 8.3.4: 17 modules, 1.21s; Notifications после обновления healthy, HTTP 200 |
+
+### Изменения
+
+- `notifications/`: отдельный проект FastAPI/AsyncSession/asyncpg, собственные pyproject/lock-файлы/Dockerfile/Alembic/tests. Namespace notifications_app исключает смешивание с Core app. Runtime не содержит SMTP/HTTP-relay зависимостей; новые пакеты-инфраструктура не вводились.
+- Модель NotificationJob и новая revision `0001_notification_jobs`: семь полей id/payload/mime/status/attempts/available_at/last_error. Внешний UUID без нового генератора, nullable BYTEA под будущий MIME, JSON-object/state/attempts/MIME constraints и частичный pending index. Downgrade блокируется на непустой таблице. Это storage, не обработка заданий.
+- `infrastructure/postgres/{bootstrap.sh,databases.sql,schema.sql}`: повторяемое создание второй БД и обычных ролей, отзыв PUBLIC/чужого CONNECT, владение собственной схемой/известными таблицами. Нет initdb, DROP, удаления строк или REASSIGN OWNED кластера. Старый events остаётся администратором. psql variables/format обеспечивают quoting; секреты не выводятся.
+- `compose.yaml`: Core использует core_app; Notifications — свою БД/роль и healthcheck. Одноразовые bootstrap/две миграции, отдельный test service. Существующие Core/test/frontend/worker/Mailpit сохранены; ни Core API, ни его health не зависят от процесса Notifications.
+- `.env.example`: отдельные прикладные credentials с локальными defaults для совместимости старого .env. Сам пользовательский .env не менялся.
+- CI: все прежние Core/frontend шаги сохранены, добавлены Notifications lint/format/Mypy/Pytest/migrations, runtime health и проверка stop-service independence. Удалённый GitHub Actions не запускался.
+- README/ARCHITECTURE/DECISIONS/WORKER_EVOLUTION и новый docs/NOTIFICATIONS_INFRASTRUCTURE: текущая инфраструктура, владение payload/MIME, безопасное обновление существующего volume, ограничения и команды. Исторические записи решений/журнала сохранены.
+
+### Реальные команды и результаты
+
+P ниже — сокращённая запись `docker compose --env-file .env.example -p event-registration-notifications-check-20261022 --profile test`. Для runtime-стека использован тот же проект без --profile test, с POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0. Это отдельный PostgreSQL instance для проверок, не второй PostgreSQL основного приложения. Рабочий проект запускается обычным docker compose с существующим .env.
+
+| Проверка | Фактически выполненная команда | Итог |
+|---|---|---|
+| Compose | `docker compose --env-file .env.example config --quiet` | PASS |
+| Сборка обоих сервисов и тестов | `P build api test notifications notifications-test frontend` | PASS; после исправления Notifications его образы пересобраны |
+| Core lint/format/types | `backend/.venv/bin/ruff check backend`; `backend/.venv/bin/ruff format --check backend`; `backend/.venv/bin/mypy --config-file backend/pyproject.toml backend/app` | PASS, 41 Python-файл / 25 app-файлов |
+| Core проверки в образе | `P run --rm --no-deps test ruff check .`; `ruff format --check .`; `mypy app` с тем же префиксом | PASS |
+| Все существующие Core tests | `P run --rm test` | PASS, 129 tests за 9.09s, 0 skipped; внутри upgrade/Pytest/check |
+| Core tests под обычной ролью | `P run --rm --no-deps -e DATABASE_URL=postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test -e TEST_DATABASE_URL=postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test test sh -c 'alembic upgrade head && pytest && alembic check'` | PASS, 129 tests за 13.64s; учётные данные здесь только отдельной тестовой БД |
+| Notifications lint/format/types | `backend/.venv/bin/ruff check notifications`; `backend/.venv/bin/ruff format --check notifications`; `backend/.venv/bin/mypy --config-file notifications/pyproject.toml notifications/notifications_app` | PASS, 18 Python-файлов / 6 app-файлов |
+| Notifications окончательный образ | `P run --rm notifications-test`; затем `P run --rm --no-deps notifications-test ruff check .`, `ruff format --check .`, `mypy notifications_app` | PASS, 25 tests за 1.51s; Alembic upgrade/check и guard/round-trip включены |
+| TS/Vite свежий запуск | `docker build --target build -t event-registration-notifications-frontend-check:local frontend`; `docker run --rm --network none event-registration-notifications-frontend-check:local npm run build` | PASS, tsc --noEmit и Vite 1.21s; исходники frontend не менялись |
+| Дамп до основного bootstrap | `docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'` и `pg_dumpall --globals-only` с локальным redirect вне репозитория; затем pg_restore --list | PASS; /tmp/MadDevs-notifications-backup-20261022, права 0600. Пароли/данные дампа не выводились |
+| Повторный bootstrap заполненного volume | В изолированном проекте `docker compose ... run --rm --no-deps db-bootstrap`; до/после SELECT count + md5(string_agg(to_jsonb(row)... ORDER BY id)) | PASS: Core 2/4/5 и Notifications payload/MIME побайтно сохранены; cmp снимков/container mount ID успешен |
+| Основной bootstrap и запуск | `docker compose run --rm --no-deps db-bootstrap`; `docker compose up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications` | PASS, bootstrap/обе миграции exit 0; исходный db container и postgres-data mount прежние |
+| Основной schema check | `docker compose exec -T api alembic current/check`; `docker compose exec -T notifications alembic current/check` (current и check отдельными командами) | PASS, Core 0002_simplify_schema, Notifications 0001_notification_jobs; No new upgrade operations detected |
+| Основная изоляция | `docker compose exec -T -e OTHER_DB=... api/notifications python - < /tmp/MadDevs-check-database-boundary.py` | PASS в обоих направлениях: собственная БД доступна, все пять административных flags=false, чужая БД=42501 |
+| Основной Core без Notifications | `docker compose stop notifications`; curl /api/health и /api/events на 127.0.0.1:8080; `docker compose up --no-build --no-deps -d --wait --wait-timeout 60 notifications` | PASS, 200 ok/ready и 200 []; Notifications восстановлен healthy |
+| Бизнес-запись без Notifications | На изолированном стеке stop notifications + HTTP POST event/два registration через frontend, затем SELECT Core own-role | PASS 201/202/202, confirmed=1/waitlisted=1, четыре pending outbox и prepared_at=NULL; основная БД не заполнялась тестовыми данными |
+| Неизменность основной БД | Сравнение снимков строк Core и docker inspect container/mount до/после | PASS. Исходные три таблицы пусты и остались пустыми; отдельно доказано сохранение заполненных таблиц на постоянном тестовом volume |
+| Неизменность кода/контрактов | SHA256 всех tracked backend/frontend против начала этапа, сравнение OpenAPI JSON; `git diff --check` | PASS |
+
+Две БД основного приложения находятся в прежнем PostgreSQL. Core сохранил 24 колонки и старые миграции; Notifications добавил одну прикладную таблицу с 7 колонками и собственную Alembic-служебную таблицу. Наличие jobs/mime/status не означает реализацию HTTP handover, подготовки MIME, retries или SMTP. Принудительный downgrade рабочей БД, очистка данных, удаление volumes, git add/commit/push не выполнялись.
+
+Итоговая контрольная отметка `2026-10-22T22:46:27+05:00`: Core api/db/frontend/Mailpit и Notifications healthy, инфраструктурный worker работает; db-bootstrap и обе миграции exit 0. Подтверждены 24 Core колонки и 7 Notifications колонок, конечные хеши основных строк и ID db container/volume совпадают с исходными. Временный проект проверки остановлен через down --remove-orphans **без --volumes**; все его named volumes сохранены. Исходный пользовательский .env и индекс Git не менялись. Ошибки health/collection исправлены, неустранённых падений выполненных проверок нет. 29 новых файлов пока untracked и не входят в обычный git diff --stat; их статистика выведена отдельно без git add. Этап завершён, relay/SMTP/UI не начаты; commit/push отсутствуют.
+### Обычная роль Core в CI и регрессия повторного bootstrap — 2026-10-22
+
+Все отметки ниже — Asia/Almaty (UTC+05:00), получены из реальных контрольных вызовов часов. Ранее незакоммиченные изменения инфраструктурного разделения сохранены.
+
+- `2026-10-22T22:59:20+05:00`: начало анализа git status/diff, Compose, CI, bootstrap, миграций и тестов. Установлено: роль core_app_test уже создаётся, но штатный Core test всё ещё использует администратора events_test.
+- `2026-10-22T23:04:52+05:00`: конфигурация переключена на core_app_test, добавлена проверка роли в Core fixture и отдельный bootstrap-test. Запущена сборка образов только нового проекта event-registration-bootstrap-check-20261022. Для db/mailpit использован временный override с удалением volume mounts из конфигурации (`volumes: !reset []`) и tmpfs, а не удалением существующих volumes. Собственные теги образов Core/Notifications исключают перезапись основных local-тегов.
+- `2026-10-22T23:06:05+05:00`: Core 129/129 под core_app_test (11.32s), Notifications 25/25 (1.14s), upgrade/check и migration round-trip успешны. Найден и исправлен порядок импортов Ruff в изменённой фикстуре; тестовые образы пересобраны.
+- `2026-10-22T23:08:02+05:00`: новый тест повторного bootstrap прошёл (1/1, 2.68s). Первый запуск выявил ошибку диагностического запроса самого теста: системный тип PostgreSQL relkind возвращался asyncpg как bytes; исправлено явным `relkind::text`. Проверки сохранены полностью. Strict Mypy нового теста проходит без подавления ошибок: для ошибки подключения проверяется точный SQLSTATE 42501 независимо от наличия обёртки SQLAlchemy.
+- `2026-10-22T23:09:28+05:00`: повторный полный Core прогон на окончательном образе — 129/129, 10.43s, без skips. Все статические проверки, явные tsc/Vite, startup/health и независимость Core при остановленном Notifications прошли. Обе runtime-схемы изолированного CI-стека прошли alembic check.
+
+Автоматический инфраструктурный тест создаёт событие с schedule_version=3, регистрации confirmed/waitlisted/cancelled с participation_no=2, билет/чекин/хеши, очередь с номером 7, три outbox-записи sent/pending/failed и три задания Notifications с payload, MIME и диагностикой попыток. Два повторных вызова настоящего bootstrap.sh сравнивают полные строки всех прикладных таблиц и alembic_version, владельцев БД/схем/таблиц/индексов, ACL, определения индексов/constraints. Проверяются READ COMMITTED, обычные роли без членства, собственные DML/DDL-права, отсутствие PUBLIC/чужих DB-привилегий и реальные отказы подключения 42501 в обоих направлениях до/после повторов. Очистка удаляет только UUID этого теста.
+
+Для команд ниже `C` означает `/tmp/maddevs-bootstrap-ci-compose`, созданный для этого прогона shell-wrapper:
+
+```sh
+export COMPOSE_PROJECT_NAME=event-registration-bootstrap-check-20261022
+export COMPOSE_ENV_FILES=.env.example COMPOSE_PROFILES=test
+export POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0
+docker compose -f compose.yaml -f /tmp/maddevs-bootstrap-ci.override.yaml "$@"
+```
+
+Override только для этого прогона: db tmpfs=/var/lib/postgresql/data, mailpit tmpfs=/data, их volumes mounts сброшены; api/worker/migrate image=event-registration-bootstrap-check-core:local, notifications/notifications-migrate image=event-registration-bootstrap-check-notifications:local. Основные сервисы/БД и прежние volumes не использовались. Ни down --volumes, ни prune не выполнялись.
+
+| Проверка | Реально выполненная команда | Итог |
+|---|---|---|
+| Compose config | `C config --quiet` (с теми же параметрами wrapper, до его создания) | PASS |
+| Build | `C build api test notifications notifications-test bootstrap-test frontend`; после исправления импортов `C build test bootstrap-test` | PASS |
+| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py'` | PASS; 41 отформатированный Python-файл, Mypy 26 файлов (приложение + изменённая фикстура) |
+| Core Pytest/Alembic | `C run --rm test` | PASS; 129/129, окончательно 10.43s, 0 skipped; внутри upgrade head, весь Pytest (включая downgrade/base/upgrade и data-preserving migration), check |
+| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS; 18 Python-файлов / 6 app-файлов Mypy |
+| Notifications Pytest/Alembic | `C run --rm notifications-test` | PASS; 25/25, 1.14s, 0 skipped; upgrade, migration round-trip в Pytest, check |
+| Bootstrap Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests && ruff format --check --config /app/pyproject.toml /bootstrap-tests && mypy --config-file /app/pyproject.toml /bootstrap-tests'` | PASS; 1 новый типизированный тестовый файл |
+| Repeat bootstrap | `C run --rm bootstrap-test` | PASS; 1/1, 2.68s; реальные скрипты и PostgreSQL, два повтора после заполнения обеих БД |
+| TypeScript/Vite | `docker build --target build -t event-registration-bootstrap-check-frontend-build:local frontend`; `docker run --rm --network none event-registration-bootstrap-check-frontend-build:local npm run build` | PASS; реально выполнены npm run typecheck (tsc --noEmit) и Vite, 17 modules, 1.53s |
+| Runtime startup | `C up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications` | PASS; оба migrate и bootstrap exit 0; API/Notifications/frontend/PostgreSQL/Mailpit healthy, worker Up |
+| Runtime Alembic | `C exec -T api alembic check`; `C exec -T notifications alembic check` | PASS; no new upgrade operations |
+| HTTP | `address=$(C port frontend 80)`; `curl --fail --silent --show-error --max-time 10 http://${address}/api/health` и `/api/events`; `C exec -T notifications python -c 'import json,urllib.request; response=urllib.request.urlopen("http://localhost:8000/health",timeout=5); body=json.load(response); assert response.status == 200 and body == {"status":"ok","database":"ready"},body; print("Notifications /health: HTTP 200",body)'` | PASS; Core health/events=200, Notifications health=200; health body status=ok/database=ready |
+| Core independence | `C stop notifications`; те же curl health/events; `C up --no-build --no-deps -d --wait --wait-timeout 60 notifications` | PASS; Core health/events=200 во время остановки Notifications |
+| Сохранность Core бизнес-кода и миграций/frontend | `git diff --exit-code -- backend/app backend/migrations frontend`; `git diff --check` | PASS; изменений этих tracked файлов нет |
+
+Итого: 155 тестов (129 Core + 25 Notifications + 1 bootstrap), ни один не отключён. Изменены только тестовая инфраструктура/фикстура, workflow и документация; SQL bootstrap, бизнес-схема и прежние миграции не менялись. Реальный удалённый GitHub Actions не запускался: выполнены локальные эквиваленты всех его проверок. Коммиты и push не выполнялись.
+
+Контроль завершения `2026-10-22T23:12:53+05:00`: docker inspect только db/test-db/mailpit нового проекта подтвердил tmpfs и 0 named volumes для каждого. `C ps --all` перед остановкой показал здоровые сервисы и успешно завершённые миграции. Выполнен `C down --remove-orphans`, exit 0: удалены только временные контейнеры/сеть, без --volumes. `git diff --stat` включает прежнюю незакоммиченную работу; новый infrastructure/tests/test_bootstrap.py остаётся untracked и в обычный diff --stat не входит. Основные файлы этого запроса: compose.yaml, .github/workflows/ci.yml, backend/tests/conftest.py, backend/Dockerfile, infrastructure/tests/test_bootstrap.py и документация.
