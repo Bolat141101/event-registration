@@ -1,4 +1,4 @@
-from pydantic import Field, PostgresDsn, field_validator
+from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     database_url: PostgresDsn = Field(repr=False)
+    notifications_internal_token: SecretStr = Field(min_length=32)
 
     @field_validator("database_url")
     @classmethod

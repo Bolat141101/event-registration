@@ -1,27 +1,28 @@
-# Core и Notifications: инфраструктурный этап
+# Core и Notifications: инфраструктура и HTTP-передача
 
 Это согласованное пользователем архитектурное решение, а не дополнительное обязательное требование PDF. Core остаётся в `backend/`, React — в `frontend/`; новый независимый Python-проект находится в `notifications/`.
 
 ## Реализовано сейчас
 
-- Core API, services, worker, модели, маршруты и все прежние тесты сохранены побайтно.
+- Публичные Core API, бизнес-правила, routes и прежние миграции сохранены. Worker теперь выполняет HTTP relay; новая Core revision 0003 расширяет состояния outbox без добавления колонок.
 - Notifications: FastAPI, AsyncEngine/AsyncSession, asyncpg, собственные зависимости/lock-файлы, Dockerfile, Alembic и тесты.
-- Единственный маршрут Notifications — `GET /health`. Внутреннего PUT/POST приёма заданий пока нет; запросы к ним возвращают 404.
+- Notifications предоставляет GET /health и защищённый POST /internal/v1/notifications. Задания фиксируются в собственной БД до 202; дубликат идентичного JSON безопасен, другой JSON с тем же ID даёт 409.
 - Один PostgreSQL хранит две независимые прикладные БД; отдельного PostgreSQL-контейнера для Notifications нет.
 - Core и Notifications проверяют только свою БД и свою Alembic revision. Core не зависит от процесса Notifications и его healthcheck.
 - Отдельный bootstrap работает поверх уже существующего PGDATA. Init-скрипт для пустого volume не используется.
 - CI сохраняет все Core/frontend проверки и добавляет проверки Notifications, изоляции ролей и доступности Core при остановленном Notifications.
 
-HTTP relay, MIME rendering/freezing, SMTP, delivery retries, Kafka, Redis, новый UI и SSE в этот этап не входят. Текущий Core worker по-прежнему проверяет готовность собственной БД. Наличие таблицы/ограничений не означает реализацию обработки заданий, идемпотентного HTTP-приёма или неизменности MIME.
+HTTP relay и delivery retries до приёма задания реализованы. MIME rendering/freezing, SMTP, Kafka, Redis, новый UI и SSE пока не реализованы. HTTP 202 означает только приём; SMTP-доставка не заявляется. Подробный версионированный контракт и обработка устаревших снимков — [NOTIFICATION_PROTOCOL.md](NOTIFICATION_PROTOCOL.md).
 
-## Владение данными и будущая граница
+## Владение данными и граница сервисов
 
 ```mermaid
 flowchart LR
     F[React / Nginx] --> C[Core API]
-    W[Core infrastructure worker] --> CD
+    W[Core HTTP relay] --> CD
+    W -->|HTTP JSON v1| N
     C --> CD
-    N[Notifications /health] --> ND
+    N[Notifications internal API] --> ND
     subgraph PG[Один PostgreSQL]
       CD[(event_registration · core_app)]
       ND[(event_notifications · notifications_app)]
@@ -31,7 +32,7 @@ flowchart LR
 
 Core владеет events, registrations и email_outbox (24 колонки). READ COMMITTED, event SELECT FOR UPDATE, отдельный MAX(waitlist_seq)+1 после lock, FIFO-продвижение внутри отмены, версии участия/переносов, билеты, токены и чекин не меняются. Никакого сетевого вызова из бизнес-транзакции не добавлено.
 
-По последнему уточнению пользователя будущий Core relay будет передавать **неизменяемый payload**, а **Notifications будет формировать и сохранять MIME**. Подготовка Core payload и фиксация Notifications MIME — разные этапы, не leases. После сохранения MIME повторная отправка должна использовать прежние байты/Message-ID; это предстоит реализовать и проверить отдельно. Ни существующий payload, ни prepared_at в Core сейчас не переписываются; состояние forwarded пока не добавлено.
+По последнему уточнению пользователя Core relay передаёт **неизменяемый payload**, а **Notifications будет формировать и сохранять MIME**. Подготовка Core payload и фиксация Notifications MIME — разные этапы, не leases. После сохранения MIME повторная отправка должна использовать прежние байты/Message-ID; это предстоит реализовать и проверить отдельно. Перед первой HTTP-попыткой Core фиксирует envelope v1 и prepared_at под event-lock; после этого payload не меняется. HTTP acceptance отмечается forwarded, не sent. Legacy prepared payload поддерживается как плоский v1-контекст без перезаписи; некорректный legacy payload остаётся failed с диагностикой.
 
 ## Базы и права
 
@@ -53,8 +54,8 @@ Bootstrap использует SQL format(%I/%L) и psql-переменные д
 
 ```text
 notification_jobs:
-  id            UUID PK, NOT NULL, без default — будущий Core outbox UUID
-  payload       JSONB NOT NULL — будущая неизменяемая команда/контекст
+  id            UUID PK, NOT NULL, без default — Core outbox UUID
+  payload       JSONB NOT NULL — неизменяемый envelope v1
   mime          BYTEA NULL — место для будущего сохранённого MIME
   status        VARCHAR(12) NOT NULL DEFAULT 'pending'
   attempts      INTEGER NOT NULL DEFAULT 0
@@ -62,9 +63,9 @@ notification_jobs:
   last_error    TEXT NULL
 ```
 
-Семь колонок; status — pending/sent/failed, attempts >= 0, payload — JSON-объект, непустой MIME при наличии, sent требует MIME. Частичный индекс pending по available_at/id. Нет recipient/kind/версий отдельными колонками: они будут частью типизированного payload. PK фиксирует уникальную идентичность хранения, но сам по себе не реализует идемпотентность будущего HTTP-контракта.
+Семь колонок; status — pending/sent/failed, attempts >= 0, payload — JSON-объект, непустой MIME при наличии, sent требует MIME. Частичный индекс pending по available_at/id. Нет recipient/kind/версий отдельными колонками: они входят в типизированный payload. PK вместе с INSERT ON CONFLICT и сравнением нормализованного JSON обеспечивает идемпотентный приём; SMTP этим не реализован.
 
-Notifications имеет собственный alembic_version и revision `0001_notification_jobs`; Core остаётся на `0002_simplify_schema`. Downgrade Notifications на base разрешён только при пустой notification_jobs; при наличии заданий он явно останавливается, чтобы не уничтожить данные. На рабочей БД downgrade не запускать.
+Notifications имеет собственный alembic_version и revision `0001_notification_jobs`; Core использует `0003_outbox_forwarded`. Downgrade Notifications на base разрешён только при пустой notification_jobs; при наличии заданий он явно останавливается, чтобы не уничтожить данные. На рабочей БД downgrade не запускать.
 
 ## Запуск и обновление существующего volume
 
@@ -130,4 +131,4 @@ test-db — отдельный PostgreSQL в tmpfs, без основного vo
 
 Наборы Core → Notifications → bootstrap-test выполняются последовательно: первые два делают downgrade/upgrade тестовых схем. Тест не воспроизводит остановку PostgreSQL/повреждение файловой системы и не доказывает атомарность bootstrap всего кластера: отдельные CREATE DATABASE не являются одной общей транзакцией.
 
-При предыдущем инфраструктурном этапе дополнительно вручную проверялись заполненные постоянные БД до/после первого и повторного bootstrap. Теперь повторяемость с данными проверяется автоматически в CI на tmpfs; штатный Core Pytest использует core_app_test. Это проверки инфраструктуры, не реализация relay или SMTP. Фактические команды, числа тестов и времена находятся в DEVELOPMENT_LOG.md.
+При предыдущем инфраструктурном этапе дополнительно вручную проверялись заполненные постоянные БД до/после первого и повторного bootstrap. Теперь повторяемость с данными проверяется автоматически в CI на tmpfs; штатный Core Pytest использует core_app_test. Дополнительно проверяются v1-контракт и сквозная потеря HTTP-ответа с двумя БД; SMTP не реализован. Фактические команды, числа тестов и времена находятся в DEVELOPMENT_LOG.md.

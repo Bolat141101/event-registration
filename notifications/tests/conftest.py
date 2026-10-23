@@ -16,7 +16,8 @@ def anyio_backend() -> str:
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
-        database_url="postgresql+asyncpg://test:private-password@127.0.0.1:1/notifications_test"
+        database_url="postgresql+asyncpg://test:private-password@127.0.0.1:1/notifications_test",
+        notifications_internal_token="test_notifications_internal_token_32_characters_minimum",
     )
 
 

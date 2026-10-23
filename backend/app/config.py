@@ -1,4 +1,4 @@
-from pydantic import Field, PostgresDsn, SecretStr, field_validator
+from pydantic import AnyHttpUrl, Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     smtp_port: int = Field(default=1025, ge=1, le=65535)
     smtp_from: str = "events@example.test"
     worker_poll_interval: float = Field(default=5.0, gt=0, le=60)
+    notifications_url: AnyHttpUrl = AnyHttpUrl("http://notifications:8000")
+    notifications_internal_token: SecretStr | None = Field(default=None, min_length=32)
+    relay_timeout: float = Field(default=5, gt=0, le=30)
+    relay_max_attempts: int = Field(default=8, ge=1, le=100)
+    relay_backoff_base: float = Field(default=1, gt=0, le=60)
+    relay_backoff_cap: float = Field(default=60, gt=0, le=3600)
+    relay_candidate_limit: int = Field(default=20, ge=1, le=100)
 
     @field_validator("database_url")
     @classmethod

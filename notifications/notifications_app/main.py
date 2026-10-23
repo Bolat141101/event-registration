@@ -4,8 +4,11 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from notifications_app.api import router
 from notifications_app.config import Settings
 from notifications_app.db import build_engine, build_session_factory
 from notifications_app.health import database_is_ready, expected_schema_heads
@@ -40,6 +43,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
+    app.state.settings = settings
+    app.include_router(router)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_contract(_request: Request, _error: RequestValidationError) -> JSONResponse:
+        # Validation errors must not echo recipient addresses or management tokens.
+        return JSONResponse(status_code=422, content={"detail": "Invalid notification contract"})
 
     @app.get("/health", response_model=HealthResponse)
     async def health(request: Request, response: Response) -> HealthResponse:

@@ -1,0 +1,156 @@
+{
+  "$defs": {
+    "NotificationPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "recipient": {
+          "maxLength": 320,
+          "minLength": 3,
+          "title": "Recipient",
+          "type": "string"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "starts_at": {
+          "format": "date-time",
+          "title": "Starts At",
+          "type": "string"
+        },
+        "schedule_version": {
+          "exclusiveMinimum": 0,
+          "maximum": 2147483647,
+          "title": "Schedule Version",
+          "type": "integer"
+        },
+        "participation_no": {
+          "exclusiveMinimum": 0,
+          "maximum": 2147483647,
+          "title": "Participation No",
+          "type": "integer"
+        },
+        "registration_status": {
+          "enum": [
+            "confirmed",
+            "waitlisted"
+          ],
+          "title": "Registration Status",
+          "type": "string"
+        },
+        "ticket_code": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ticket Code"
+        },
+        "manage_path": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "pattern": "^/registration#token=[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Manage Path"
+        },
+        "old_starts_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Old Starts At"
+        },
+        "new_starts_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "New Starts At"
+        }
+      },
+      "required": [
+        "recipient",
+        "event_id",
+        "description",
+        "starts_at",
+        "schedule_version",
+        "participation_no",
+        "registration_status"
+      ],
+      "title": "NotificationPayload",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "message_id": {
+      "format": "uuid",
+      "title": "Message Id",
+      "type": "string"
+    },
+    "registration_id": {
+      "format": "uuid",
+      "title": "Registration Id",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "ticket",
+        "waitlist",
+        "reminder",
+        "rescheduled"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/$defs/NotificationPayload"
+    }
+  },
+  "required": [
+    "schema_version",
+    "message_id",
+    "registration_id",
+    "kind",
+    "payload"
+  ],
+  "title": "NotificationMessage",
+  "type": "object"
+}

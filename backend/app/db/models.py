@@ -47,6 +47,7 @@ class NotificationKind(StrEnum):
 
 class OutboxStatus(StrEnum):
     PENDING = "pending"
+    FORWARDED = "forwarded"
     SENT = "sent"
     CANCELLED = "cancelled"
     FAILED = "failed"
@@ -128,13 +129,13 @@ class EmailOutbox(Base):
             "kind IN ('ticket', 'waitlist', 'reminder', 'rescheduled')", name="valid_kind"
         ),
         CheckConstraint(
-            "status IN ('pending', 'sent', 'cancelled', 'failed')", name="valid_status"
+            "status IN ('pending', 'forwarded', 'sent', 'cancelled', 'failed')", name="valid_status"
         ),
         CheckConstraint("attempts >= 0", name="nonnegative_attempts"),
         CheckConstraint("length(dedup_key) > 0", name="nonempty_dedup_key"),
         CheckConstraint("jsonb_typeof(payload) = 'object'", name="object_payload"),
         CheckConstraint(
-            "status <> 'sent' OR prepared_at IS NOT NULL",
+            "status NOT IN ('sent', 'forwarded') OR prepared_at IS NOT NULL",
             name="consistent_delivery_state",
         ),
         Index(

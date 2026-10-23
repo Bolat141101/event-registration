@@ -14,13 +14,14 @@
 - согласованные счётчики confirmed/waitlisted/checked_in одним SQL-снимком;
 - транзакционная постановка ticket/waitlist/reminder/rescheduled в outbox;
 - версии переносов, идемпотентные повторы, неизменность prepared-писем;
-- инфраструктурный worker Core, отдельный каркас Notifications с собственной БД/ролью, Mailpit, два healthcheck, production-сборка React и CI.
+- последовательный async HTTP relay с deadline/backoff, защищённый идемпотентный inbox Notifications, собственная БД/роль каждого сервиса;
+- Mailpit, два healthcheck, production-сборка React и CI с реальными сетевыми проверками отказов.
 
-**Письма пока не отправляются.** Core worker только проверяет свою БД, Notifications предоставляет только `/health` и таблицу заданий; HTTP relay, SMTP, подготовка MIME, retries отправки, SSE и полноценные экраны остаются следующими этапами. Токен новой регистрации находится в первом ticket/waitlist payload outbox и публичным API не возвращается. Для текущих backend-проверок он читается только в изолированных тестах; обычный пользовательский путь через email появится на следующем этапе. Наличие заданий не означает доставку писем.
+**Письма пока не отправляются.** Core worker передаёт готовые задания по HTTP и сохраняет retry/backoff; Notifications подтверждает приём только после commit. HTTP acceptance — forwarded, не sent. SMTP, подготовка MIME, retries SMTP, SSE и полноценные экраны остаются следующими этапами. Токен новой регистрации находится в первом ticket/waitlist payload outbox и публичным API не возвращается. Для текущих backend-проверок он читается только в изолированных тестах; обычный пользовательский путь через email появится на следующем этапе. Наличие заданий не означает доставку писем.
 
 ## Core + Notifications
 
-Один PostgreSQL обслуживает event_registration/core_app и event_notifications/notifications_app. Core хранит бизнес-данные и outbox; Notifications имеет отдельный проект/миграции и notification_jobs (7 колонок, nullable MIME). Core не зависит от доступности процесса Notifications. Согласованная следующая граница: Core фиксирует неизменяемый payload, Notifications формирует и сохраняет MIME. Приём заданий, формирование MIME и SMTP ещё не реализованы.
+Один PostgreSQL обслуживает event_registration/core_app и event_notifications/notifications_app. Core хранит бизнес-данные и outbox; Notifications имеет отдельный проект/миграции и notification_jobs (7 колонок, nullable MIME). Core не зависит от доступности процесса Notifications. Согласованная следующая граница: Core фиксирует неизменяемый payload, Notifications формирует и сохраняет MIME. Приём заданий реализован через защищённый POST /internal/v1/notifications. Формирование MIME и SMTP ещё не реализованы.
 
 `db-bootstrap` работает с существующим volume: создаёт отсутствующую вторую БД/обычные роли, изолирует доступ и адресно передаёт владельцев таблиц без изменения строк. POSTGRES_USER остаётся техническим администратором, не пользователем API. Подробные настройки, обновление и проверки — [docs/NOTIFICATIONS_INFRASTRUCTURE.md](docs/NOTIFICATIONS_INFRASTRUCTURE.md).
 
@@ -148,6 +149,7 @@ Workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) запускает
 4. Отдельные Ruff/format/Mypy и интеграционный тест повторного bootstrap с данными в обеих тестовых БД, контролем владельцев/прав и запрета доступа между сервисами.
 5. Сборку frontend: Dockerfile запускает `npm ci` и `npm run build`, который включает TypeScript typecheck и Vite.
 6. Запуск приложения с новыми БД/volumes, проверки обоих health и независимости Core при остановленном Notifications.
+7. Реальный HTTP relay smoke: недоступность получателя, SIGKILL relay, восстановление, конкурентные повторы, 409/401 и разрыв TCP после commit с перезапуском Notifications/relay.
 
 Используется отдельный Compose-проект `event-registration-ci` и `.env.example`; настоящие секреты и дополнительные сервисы GitHub не нужны. Все три опубликованных порта устанавливаются в `0`, Docker выбирает свободные; адрес frontend берётся через `docker compose port`. Это позволяет выполнять те же команды рядом с обычным локальным приложением. Worker/Redis/Celery дополнительно не вводятся.
 
@@ -157,11 +159,13 @@ Workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) запускает
 
 ## Структура и дальнейшие шаги
 
-`backend/app/api` содержит HTTP, `services` — реализованные бизнес-операции, `db` — SQLAlchemy и соединения, `notifications` внутри backend — реализованную постановку outbox и будущую фиксацию payload. Отдельный проект `notifications/` содержит инфраструктуру будущего приёма, формирования MIME и SMTP. Доменные операции не вызывают SMTP и не зависят от способа выбора заданий worker. Пустой исходный `main.py` в корне не используется; точка входа API находится в `backend/app/main.py`.
+`backend/app/api` содержит HTTP, `services` — реализованные бизнес-операции, `db` — SQLAlchemy и соединения, `notifications` внутри backend — реализованную постановку outbox и фиксацию payload перед HTTP. Отдельный проект `notifications/` содержит идемпотентный внутренний HTTP-приём и инфраструктуру будущего формирования MIME/SMTP. Доменные операции не вызывают SMTP и не зависят от способа выбора заданий worker. Пустой исходный `main.py` в корне не используется; точка входа API находится в `backend/app/main.py`.
 
-Далее: HTTP relay неизменяемого payload и идемпотентный приём в Notifications, формирование/фиксация MIME в Notifications и SMTP с проверками сбоя после SMTP accept, доставка уже поставленных напоминаний и уведомлений о переносе; пользовательские экраны и SSE; финальная проверка, описание улучшений и отдельное ESSAY.md из 10 предложений. Регистрация, FIFO, чекин и транзакционная постановка уведомлений уже реализованы и покрыты тестами. Обязательные пункты PDF сохранены в REQUIREMENTS.md.
+Реализованы HTTP relay неизменяемого payload и идемпотентный приём в Notifications; контракт и гарантии описаны в [NOTIFICATION_PROTOCOL.md](docs/NOTIFICATION_PROTOCOL.md). Далее: формирование/фиксация MIME в Notifications и SMTP с проверками сбоя после SMTP accept, доставка уже поставленных напоминаний и уведомлений о переносе; пользовательские экраны и SSE; финальная проверка, описание улучшений и отдельное ESSAY.md из 10 предложений. Регистрация, FIFO, чекин и транзакционная постановка уведомлений уже реализованы и покрыты тестами. Обязательные пункты PDF сохранены в REQUIREMENTS.md.
 
-Сейчас работает один инфраструктурный worker Core; Notifications не имеет отправителя. Будущий relay и SMTP-отправитель будут последовательными, по одному экземпляру каждого. Для будущего роста предусмотрен [план конкурентной обработки](docs/WORKER_EVOLUTION.md): `FOR UPDATE SKIP LOCKED`, leases и идемпотентность добавляются в выбор/завершение outbox-задач. Регистрация и FIFO при этом остаются в прежних транзакциях. Эти механизмы, Redis и Celery сейчас не реализованы.
+Сейчас работает один последовательный HTTP relay Core (`python -m app.worker`); Notifications сохраняет принятые задания, отправителя SMTP пока нет. Relay использует httpx AsyncClient без открытой DB-транзакции, сохраняет попытки/backoff и помечает HTTP 202 как forwarded, а не sent. Будущий SMTP-отправитель также будет последовательным. Для будущего роста предусмотрен [план конкурентной обработки](docs/WORKER_EVOLUTION.md): `FOR UPDATE SKIP LOCKED`, leases и идемпотентность добавляются в выбор/завершение outbox-задач. Регистрация и FIFO при этом остаются в прежних транзакциях. Эти механизмы, Redis и Celery сейчас не реализованы.
+
+Занятое мероприятие не блокирует всю рассылку: relay перебирает ограниченную страницу голов разных событий, пропускает недоступный event-lock через NOWAIT и возвращается к нему в следующем обходе. RELAY_CANDIDATE_LIMIT задаётся в .env (default 20). При полностью занятой странице worker делает паузу; участники FIFO и prepared payload остаются под прежними правилами.
 
 ## Решения, происхождение и AI
 

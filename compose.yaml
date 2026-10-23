@@ -26,6 +26,7 @@ x-notifications: &notifications
     target: runtime
   environment:
     DATABASE_URL: postgresql+asyncpg://${NOTIFICATIONS_DB_USER:-notifications_app}:${NOTIFICATIONS_DB_PASSWORD:-local_notifications_password_change_me}@db:5432/${NOTIFICATIONS_DB:-event_notifications}
+    NOTIFICATIONS_INTERNAL_TOKEN: ${NOTIFICATIONS_INTERNAL_TOKEN:-local_notifications_internal_token_change_me_32_chars}
 
 services:
   db:
@@ -114,11 +115,14 @@ services:
   worker:
     <<: *backend
     command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *backend-environment
+      NOTIFICATIONS_URL: http://notifications:8000
+      RELAY_CANDIDATE_LIMIT: ${RELAY_CANDIDATE_LIMIT:-20}
+      NOTIFICATIONS_INTERNAL_TOKEN: ${NOTIFICATIONS_INTERNAL_TOKEN:-local_notifications_internal_token_change_me_32_chars}
     depends_on:
       migrate:
         condition: service_completed_successfully
-      mailpit:
-        condition: service_healthy
     init: true
     stop_grace_period: 10s
     restart: unless-stopped
@@ -212,6 +216,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://notifications_app_test:notifications_database_password_local_only@test-db:5432/event_notifications_test
       TEST_DATABASE_URL: postgresql+asyncpg://notifications_app_test:notifications_database_password_local_only@test-db:5432/event_notifications_test
       TEST_CORE_DATABASE_URL: postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test
+      NOTIFICATIONS_INTERNAL_TOKEN: test_notifications_internal_token_32_characters_minimum
     command: ["sh", "-c", "alembic upgrade head && pytest && alembic check"]
     depends_on:
       test-db-bootstrap:
@@ -226,10 +231,15 @@ services:
       <<: *test-bootstrap-environment
       TEST_CORE_DATABASE_URL: postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test
       TEST_NOTIFICATIONS_DATABASE_URL: postgresql+asyncpg://notifications_app_test:notifications_database_password_local_only@test-db:5432/event_notifications_test
+      NOTIFICATIONS_INTERNAL_TOKEN: test_notifications_internal_token_32_characters_minimum
+      PYTHONPATH: /app:/notifications
+      MYPYPATH: /app:/notifications
     volumes:
       - ./infrastructure/postgres:/bootstrap:ro
       - ./infrastructure/tests:/bootstrap-tests:ro
+      - ./infrastructure/checks:/checks:ro
       - ./notifications:/notifications:ro
+      - ./docs/notification-contract-v1.schema.json:/contract/v1.schema.json:ro
     command: ["pytest", "-c", "/app/pyproject.toml", "/bootstrap-tests"]
     depends_on:
       test-db-bootstrap:

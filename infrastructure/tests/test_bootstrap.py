@@ -85,6 +85,7 @@ async def databases() -> AsyncIterator[tuple[AsyncEngine, AsyncEngine]]:
             "PYTHONDONTWRITEBYTECODE": "1",
             "DATABASE_URL": url.render_as_string(hide_password=False),
             "ORGANIZER_TOKEN": "test_organizer_token_32_characters_minimum",
+            "NOTIFICATIONS_INTERNAL_TOKEN": os.environ["NOTIFICATIONS_INTERNAL_TOKEN"],
         }
         await run_command(
             sys.executable, "-m", "alembic", "upgrade", "head", cwd=directory, env=environment
