@@ -70,7 +70,7 @@ jobs:
         run: docker compose build frontend
 
       - name: Start Compose services and apply application migrations
-        run: docker compose up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications
+        run: docker compose up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications notifications-sender
 
       - name: Verify API health through frontend proxy
         run: |
@@ -107,6 +107,30 @@ jobs:
           docker compose up --no-build --no-deps -d worker
           smoke recover
 
+      - name: Real SMTP outage, sender restart and lost DATA response
+        run: |
+          core() {
+            docker compose run --rm --no-deps -T -e RELAY_SMOKE_PROJECT="$COMPOSE_PROJECT_NAME" worker python - create < infrastructure/checks/relay_smoke.py
+          }
+          smtp() {
+            docker compose run --rm --no-deps -T -e RELAY_SMOKE_PROJECT="$COMPOSE_PROJECT_NAME" notifications-sender python - "$1" < infrastructure/checks/smtp_smoke.py
+          }
+          smtp recover
+          docker compose pause mailpit
+          core
+          smtp outage
+          docker compose kill -s SIGKILL notifications-sender
+          docker compose unpause mailpit
+          docker compose up --no-build --no-deps -d notifications-sender
+          smtp recover
+          docker compose stop notifications-sender
+          core
+          smtp lost-response
+          docker compose restart notifications
+          docker compose up --no-build --no-deps -d --wait --wait-timeout 60 notifications
+          docker compose up --no-build --no-deps -d notifications-sender
+          smtp recover
+
       - name: Show Compose diagnostics on failure
         if: failure()
         run: |
@@ -115,4 +139,9 @@ jobs:
 
       - name: Remove CI containers and volumes
         if: always()
-        run: docker compose down --volumes --remove-orphans
+        run: |
+          mailpit=$(docker compose ps -q mailpit)
+          if [ -n "$mailpit" ] && [ "$(docker inspect -f '{{.State.Paused}}' "$mailpit")" = "true" ]; then
+            docker compose unpause mailpit
+          fi
+          docker compose down --volumes --remove-orphans

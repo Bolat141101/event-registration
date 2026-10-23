@@ -29,7 +29,7 @@ class NotificationJob(Base):
         Index("ix_jobs_pending", "available_at", "id", postgresql_where=text("status = 'pending'")),
     )
 
-    # Future handover will supply the existing Core outbox UUID, never a new identity.
+    # Identity supplied by Core; HTTP and SMTP retries keep the same UUID.
     id: Mapped[UUID] = mapped_column(primary_key=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     mime: Mapped[bytes | None] = mapped_column(LargeBinary)

@@ -1,4 +1,4 @@
-# Core и Notifications: инфраструктура и HTTP-передача
+# Core и Notifications: инфраструктура, HTTP и SMTP
 
 Это согласованное пользователем архитектурное решение, а не дополнительное обязательное требование PDF. Core остаётся в `backend/`, React — в `frontend/`; новый независимый Python-проект находится в `notifications/`.
 
@@ -12,7 +12,7 @@
 - Отдельный bootstrap работает поверх уже существующего PGDATA. Init-скрипт для пустого volume не используется.
 - CI сохраняет все Core/frontend проверки и добавляет проверки Notifications, изоляции ролей и доступности Core при остановленном Notifications.
 
-HTTP relay и delivery retries до приёма задания реализованы. MIME rendering/freezing, SMTP, Kafka, Redis, новый UI и SSE пока не реализованы. HTTP 202 означает только приём; SMTP-доставка не заявляется. Подробный версионированный контракт и обработка устаревших снимков — [NOTIFICATION_PROTOCOL.md](NOTIFICATION_PROTOCOL.md).
+HTTP relay, MIME rendering/freezing и async SMTP sender реализованы. Kafka, Redis, новый UI и SSE не добавлены. HTTP 202 означает только приём, Notifications sent — SMTP accept. [SMTP и ручной retry](SMTP_DELIVERY.md). Подробный версионированный контракт и обработка устаревших снимков — [NOTIFICATION_PROTOCOL.md](NOTIFICATION_PROTOCOL.md).
 
 ## Владение данными и граница сервисов
 
@@ -27,12 +27,13 @@ flowchart LR
       CD[(event_registration · core_app)]
       ND[(event_notifications · notifications_app)]
     end
-    M[Mailpit · доставка ещё не подключена]
+    S[Notifications sender] --> ND
+    S -->|async SMTP| M[Mailpit]
 ```
 
 Core владеет events, registrations и email_outbox (24 колонки). READ COMMITTED, event SELECT FOR UPDATE, отдельный MAX(waitlist_seq)+1 после lock, FIFO-продвижение внутри отмены, версии участия/переносов, билеты, токены и чекин не меняются. Никакого сетевого вызова из бизнес-транзакции не добавлено.
 
-По последнему уточнению пользователя Core relay передаёт **неизменяемый payload**, а **Notifications будет формировать и сохранять MIME**. Подготовка Core payload и фиксация Notifications MIME — разные этапы, не leases. После сохранения MIME повторная отправка должна использовать прежние байты/Message-ID; это предстоит реализовать и проверить отдельно. Перед первой HTTP-попыткой Core фиксирует envelope v1 и prepared_at под event-lock; после этого payload не меняется. HTTP acceptance отмечается forwarded, не sent. Legacy prepared payload поддерживается как плоский v1-контекст без перезаписи; некорректный legacy payload остаётся failed с диагностикой.
+По последнему уточнению пользователя Core relay передаёт **неизменяемый payload**, а **Notifications формирует и сохраняет MIME**. Подготовка Core payload и фиксация Notifications MIME — разные этапы, не leases. После сохранения MIME повторная отправка должна использовать прежние байты/Message-ID; это реализовано и проверено на настоящем Mailpit, включая потерю SMTP ACK. Перед первой HTTP-попыткой Core фиксирует envelope v1 и prepared_at под event-lock; после этого payload не меняется. HTTP acceptance отмечается forwarded, не sent. Legacy prepared payload поддерживается как плоский v1-контекст без перезаписи; некорректный legacy payload остаётся failed с диагностикой.
 
 ## Базы и права
 
@@ -56,14 +57,14 @@ Bootstrap использует SQL format(%I/%L) и psql-переменные д
 notification_jobs:
   id            UUID PK, NOT NULL, без default — Core outbox UUID
   payload       JSONB NOT NULL — неизменяемый envelope v1
-  mime          BYTEA NULL — место для будущего сохранённого MIME
+  mime          BYTEA NULL — неизменяемый MIME после первого prepare
   status        VARCHAR(12) NOT NULL DEFAULT 'pending'
   attempts      INTEGER NOT NULL DEFAULT 0
   available_at  TIMESTAMPTZ NOT NULL DEFAULT now()
   last_error    TEXT NULL
 ```
 
-Семь колонок; status — pending/sent/failed, attempts >= 0, payload — JSON-объект, непустой MIME при наличии, sent требует MIME. Частичный индекс pending по available_at/id. Нет recipient/kind/версий отдельными колонками: они входят в типизированный payload. PK вместе с INSERT ON CONFLICT и сравнением нормализованного JSON обеспечивает идемпотентный приём; SMTP этим не реализован.
+Семь колонок; status — pending/sent/failed, attempts >= 0, payload — JSON-объект, непустой MIME при наличии, sent требует MIME. Частичный индекс pending по available_at/id. Нет recipient/kind/версий отдельными колонками: они входят в типизированный payload. PK вместе с INSERT ON CONFLICT и сравнением нормализованного JSON обеспечивает идемпотентный приём; SMTP отдельно реализован sender, а не самим наличием колонок.
 
 Notifications имеет собственный alembic_version и revision `0001_notification_jobs`; Core использует `0003_outbox_forwarded`. Downgrade Notifications на base разрешён только при пустой notification_jobs; при наличии заданий он явно останавливается, чтобы не уничтожить данные. На рабочей БД downgrade не запускать.
 
@@ -86,7 +87,7 @@ docker compose build api notifications
 docker compose up -d --wait --wait-timeout 120
 ```
 
-Порядок: db healthy → db-bootstrap exit 0 → две независимые миграции → api/worker и notifications. Frontend зависит только от Core API. Bootstrap также можно вызвать явно:
+Порядок: db healthy → db-bootstrap exit 0 → две независимые миграции → api/worker и notifications/notifications-sender; отправитель не зависит от Mailpit readiness. Frontend зависит только от Core API. Bootstrap также можно вызвать явно:
 
 ```sh
 docker compose run --rm --no-deps db-bootstrap

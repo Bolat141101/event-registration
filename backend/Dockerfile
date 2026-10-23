@@ -25,6 +25,9 @@ CMD ["pytest"]
 # The Core runtime and its ordinary test image do not include this administrative client.
 FROM test AS bootstrap-test
 USER root
+# Only cross-service tests load the independent Notifications sender.
+COPY --from=notifications /requirements.lock /tmp/notifications-requirements.lock
+RUN pip install --no-cache-dir -r /tmp/notifications-requirements.lock
 RUN apt-get update \
     && apt-get install --no-install-recommends -y postgresql-client \
     && rm -rf /var/lib/apt/lists/*

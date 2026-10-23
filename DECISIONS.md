@@ -222,3 +222,24 @@
 | Курсор только в памяти, без новых DB-полей | Не владение заданием: после рестарта durable pending снова обнаруживаются. При большом числе занятых страниц возможна задержка на poll interval каждой страницы | Полный Core/Notifications/infra Pytest и SIGKILL/restart HTTP smoke |
 
 Схема, старые миграции, FIFO участников, registration API/токены и правила prepared payload не менялись. При lock skip не изменяются attempts/available_at/payload/prepared_at/last_error. HTTP acceptance по-прежнему означает forwarded, не SMTP delivery; идемпотентность message_id/envelope сохранена. Порядок среди готовых писем одного события остаётся available_at/id, а прежний retry backoff может отсрочить отдельное письмо: строгий порядок принятия всех писем после сетевых сбоев не добавлялся. Несколько relay/leases/SKIP LOCKED остаются будущим этапом.
+
+
+## Асинхронная SMTP-доставка в Notifications — 2026-10-23
+
+Контрольная отметка: `2026-10-23T09:59:38+05:00`. Пользователь разрешил SMTP через локальный Mailpit, без нового UI/SSE. Перед этапом дерево было чистым, HEAD c4215d3 (`add reliable async notification delivery`).
+
+| Решение | Причина и компромисс | Проверка |
+|---|---|---|
+| Один отдельный notifications-sender, aiosmtplib 5.1.3 | SMTP не блокирует event loop/API, нет второго sender из FastAPI lifespan; один процесс без leases | Реальные SMTP TCP отказы/timeout, SIGKILL/restart; дальнейший параллелизм требует отдельного claim-протокола |
+| Core prepared_at и Notifications mime IS NOT NULL — две разные границы | Прежний Core замораживает логический JSON, Notifications сохраняет MIME+attempt/backoff до сети. Новые колонки/миграции не нужны | Байты/To/From/Date/Message-ID сохраняются при retry, смене SMTP_FROM и времени, отмене/переносе/рестарте |
+| SMTP sendmail получает сохранённые bytes, envelope извлекается из MIME | Не пересериализовать и не пересоздавать Date/ID на повторе; задан local_hostname без синхронного getfqdn | Сравнение заголовков/тела Mailpit с PostgreSQL MIME, повреждённые адрес/ID отклоняются |
+| Новые plain-text шаблоны четырёх видов, явный исторический смысл | Нет HTML/template engine, description только в теле, приватная ссылка из Core + PUBLIC_APP_URL; UI ещё отсутствует | MIME unit-тесты, нет header injection; IDN без SMTPUTF8 |
+| Источник актуальности/сроков остаётся Core, без latest-wins в Notifications | Сохраняется v1 и прежнее решение о исторических снимках. После Core freeze отмена не отзывает уже переданное письмо, даже до подготовки MIME; Core-состояние не реактивируется | Cancel/resume/reschedule до/после MIME, обновлённый −24h deadline, старые HTTP повторы не сбрасывают sent/failed |
+| SMTP DATA accept → Notifications sent, HTTP 202 → Core forwarded | Нет ложного SMTP-успеха по ACK HTTP; отсутствие общей транзакции SMTP/DB остаётся | Настоящий TCP proxy теряет DATA-ответ после Mailpit accept; retry использует тот же MIME |
+| Ограниченный retry/backoff, 5xx сразу failed, временные ошибки pending | Недоступность SMTP не теряет строки; crash расходует заранее сохранённую попытку. После лимита требуется оператор | Бюджет, последняя прерванная попытка, реальные 4xx/5xx/disconnect/timeout, отсутствие DB-сессии в SMTP |
+| CLI retry одного failed ID с --acknowledge-duplicate-risk | Оператор останавливает sender; ID/payload/MIME не меняются, sent/pending/invalid не оживляются; повтор команды не сбрасывает бюджет ещё раз | Функция retry + настоящий subprocess CLI: отказ без флага, успешный targeted retry, повтор отклонён |
+| Sanitized last_error/logging и hide_input_in_errors для Settings | SMTP response/exception text могут содержать адреса/секреты; не выводить их даже при ошибке startup-конфигурации | SMTP-ошибки с адресом/токеном, caplog и DB diagnostics; ошибочные настройки не показывают input |
+| MP_IGNORE_DUPLICATE_IDS=true и MP_QUIET=true | Подавление дубля по ID только в сохранённом Mailpit store; не exactly-once, не сравнение содержимого | После SMTP accept/lost response/restart в Mailpit одна копия; ограничения очистки/потери store описаны явно |
+| Отдельный test-mailpit tmpfs, обычные test DB роли | Никаких основных данных/volumes; реальный SMTP в PostgreSQL интеграционных тестах. Только infrastructure test target устанавливает Notifications runtime lock через build context | Все три последовательных набора, bootstrap/изоляция/права, полные локальные CI-проверки |
+
+Новые сущности, Redis, Kafka, Celery, распределённые leases, DB-триггеры неизменности, отменяющий HTTP-протокол и новые API-маршруты не добавлены. Полный контракт/риски и ручной retry: [docs/SMTP_DELIVERY.md](docs/SMTP_DELIVERY.md). После исчерпания бюджета автоматической гарантии eventual delivery нет: требуется вмешательство. Exactly-once SMTP не обещается.

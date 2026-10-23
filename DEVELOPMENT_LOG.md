@@ -504,3 +504,102 @@ Override: db и mailpit volumes mounts сброшены `!reset []`, вмест�
 Вывод проверки: исходный HOL-дефект не воспроизводится; новых сбоев в проверенных сценариях не найдено. **215/215 уникальных Pytest-тестов, 0 skips**, дополнительно 50 повторных выполнений конкурентных тестов. Текущий алгоритм ограничивает попытки prepare за проход, выбирает одну ready-голову на событие по available_at/id, делает полный rollback перед skip55P03, сохраняет курсор до следующего poll и возвращается к занятым событиям. Prepared JSON/ID, API и бизнес-правила не менялись. Глобальная сортировка между независимыми событиями по-прежнему заменена UUID round-robin; строгая доставка всех писем по порядку после backoff не обещается. Проект ещё не завершён целиком: SMTP/MIME sender, SSE и полноценные пользовательские экраны отсутствуют согласно текущему этапу. Удалённый GitHub Actions не запускался. Из файлов проекта в этой проверке изменён только этот журнал; commit/push не выполнялись.
 
 Завершение повторной проверки `2026-10-23T09:16:26+05:00`: `C down --remove-orphans` exit 0, без --volumes; временные контейнеры/сеть удалены. Основная установка не затронута. git diff --check успешен, git diff --stat показан.
+
+
+### SMTP sender Notifications — 2026-10-23
+
+Время — реальные контрольные чтения часов Asia/Almaty (UTC+05:00), не придуманная история.
+
+- `2026-10-23T09:39:07+05:00`: проверены git status/diff (чисто, HEAD c4215d3), Core outbox/relay, Notifications inbox/семь колонок, миграции, тесты/CI. Пользователь разрешил только SMTP-этап, без UI/SSE. Прежний v1-контракт исторических снимков сохранён.
+- `2026-10-23T09:42:50+05:00`: реализованы MIME renderer/load, async SMTP adapter и prepare/SMTP/finish sender. MIME/попытка/backoff коммитятся до сети. Первая pip-compile команда остановилась из-за недоступного каталога cache вне workspace; повтор с /tmp cache успешен, добавлен только aiosmtplib==5.1.3, остальные pins сохранены.
+- `2026-10-23T09:44:52+05:00`: настройки, отдельный worker/CLI retry, Compose notifications-sender/test-mailpit и новые тесты подготовлены; strict Mypy исходников успешен. Проверены официальные aiosmtplib raw send/sendmail/error docs и Mailpit runtime options; ссылки сохранены в SMTP_DELIVERY.md.
+- `2026-10-23T09:47:53+05:00`: отдельные образы собраны; полный Core **160 passed (10.73s)** и Alembic check. Основные DB/volumes не используются.
+- `2026-10-23T09:48:28+05:00`: первый Notifications прогон 89 passed/3 failed: один настоящий дефект обработки HeaderParseError для a@, два ошибочных async-with pytest.raises в новых тестах. Исправлены нормализация исключения в mailbox и контекстные менеджеры тестов. Первый infrastructure прогон 8 passed/1 failed: тест искал билет в сырых quoted-printable bytes; исправлен на декодированное MIME-содержимое. Падающие проверки не отключались.
+- `2026-10-23T09:50:22+05:00`: Notifications **92/92**, реальные SMTP 4xx/5xx/disconnect/timeout, Mailpit duplicate, restart/MIME/бюджет и защиты replay успешны. Постоянные SMTP ошибки сохраняются failed, временные pending с backoff; нет исключений/адресов/токенов в last_error/logging.
+- `2026-10-23T09:52:08+05:00`: сохранён и выполнен прежний реальный HTTP relay smoke: outage, SIGKILL, recovery, concurrent202/conflict409/auth401, настоящий lost ACK после commit и рестарты. Новые сквозные тесты используют обе обычные DB-роли и реальный test-mailpit; сроки/cancel/resume/reschedule проверяются бизнес-сервисами Core.
+- `2026-10-23T09:53:11+05:00`: **11 infrastructure tests passed (18.16s)**. Новый реальный SMTP CI smoke прошёл: Mailpit pause → pending/MIME/attempts, SIGKILL sender → unpause/restart → sent; затем SMTP TCP proxy передал DATA в реальный Mailpit и потерял ответ. После рестарта прежний MIME повторён, сохранена одна Mailpit-копия. Все четыре runtime письма совпали с MIME в БД по заголовкам и декодированному телу.
+- `2026-10-23T09:57:40+05:00`: настоящий subprocess CLI retry проверен: без --acknowledge-duplicate-risk отказ, один failed реактивируется без изменения ID/JSON/MIME, повтор не сбрасывает pending. Полные Notifications **93 passed (4.28s)**. Frontend tsc/Vite PASS; UI не изменялся.
+- `2026-10-23T09:58:48+05:00`: runtime SELECT подтвердил Core 24 колонки, 4 forwarded + 4 будущих reminder pending; Notifications 7 колонок, 4 sent со всеми MIME. Runtime alembic check обоих сервисов PASS. Девять временных сервисов running, все имеющиеся healthchecks healthy; worker/sender без неожиданных iteration errors. db/test-db/mailpit/test-mailpit только tmpfs, без named volume mounts. Core proxy health и Notifications health HTTP 200.
+- `2026-10-23T09:59:38+05:00`: Settings.hide_input_in_errors добавлен вместе с регрессией, чтобы startup traceback при ошибочной настройке не содержал адресов/токена. Пересобраны окончательные Notifications images; публичный HTTP-контракт, бизнес-сервисы и миграции не менялись.
+- `2026-10-23T10:01:26+05:00`: окончательные Notifications **94 passed (4.03s)**, Ruff/format/Mypy PASS (31/15 файлов). Финальные API/sender запущены с новым образом, SMTP recover подтвердил сохранность четырёх sent/MIME/писем. Повторный полный infrastructure прогон запущен после окончательного изменения Settings.
+
+#### Файлы и назначение
+
+| Файл / функции | Изменение |
+|---|---|
+| notifications/notifications_app/mime.py — PreparedEmail, mailbox, render, load_prepared | Четыре plain-text шаблона, безопасный SMTP envelope, стабильные From/To/Date/Message-ID, загрузка прежних bytes; repr без PII |
+| notifications/notifications_app/smtp.py — send_email | aiosmtplib connect/sendmail/close, bytes без ресериализации, local_hostname без getfqdn, локальный Mailpit без внешних аккаунтов |
+| notifications/notifications_app/sender.py — Sender.prepare/run_once/finish/backoff | Due-выборка, короткий row-lock/commit до SMTP, один общий deadline, устойчивый retry/budget/failed/sent; DB не удерживается во время сети |
+| notifications/notifications_app/worker.py — run; clock.py | Один процесс, async sleep, сигналы/завершение/health собственной схемы, logging только класса ошибки |
+| notifications/notifications_app/retry.py — retry_failed/main | CLI targeted retry только failed, явное принятие риска, без изменения MIME/payload/ID, не оживляет pending/sent/invalid |
+| notifications/notifications_app/config.py; models.py | Настройки SMTP/сроков/бюджета, валидация sender/public origin, скрытие ошибочного input; в модели изменён только устаревший комментарий, схема прежняя |
+| notifications/pyproject.toml; requirements*.lock | Единственная новая runtime зависимость aiosmtplib 5.1.3; прежние версии не обновлены |
+| notifications/tests/integration/test_sender.py; test_smtp.py; tests/unit/test_mime.py; test_config.py | Постоянство MIME/бюджет/crash/CLI/replay/нет DB-транзакции, реальные TCP SMTP ошибки и Mailpit, все виды писем/безопасность адресов и диагностики |
+| infrastructure/tests/test_email_delivery.py | Core cancel/resume/переносы/−24h → HTTP inbox → MIME → реальный Mailpit, до/после обеих границ и retry после бизнес-изменения |
+| infrastructure/checks/smtp_smoke.py; .github/workflows/ci.yml | Настоящие SMTP outage/SIGKILL/lost DATA ACK/restart в CI; cleanup размораживает paused Mailpit даже при ошибке проверки |
+| compose.yaml; .env.example | Один notifications-sender с собственной ролью, тестовый Mailpit tmpfs, SMTP/settings, quiet Mailpit; обе миграции прежние |
+| backend/Dockerfile | Только bootstrap-test target получает Notifications runtime lock через additional build context; Core runtime/test не получают SMTP-зависимость |
+| backend/app/worker.py | Исправлена только устаревшая стартовая фраза: SMTP теперь принадлежит Notifications |
+| README.md; ARCHITECTURE.md; DECISIONS.md; DEVELOPMENT_LOG.md; docs/SMTP_DELIVERY.md; NOTIFICATION_PROTOCOL.md; NOTIFICATIONS_INFRASTRUCTURE.md; WORKER_EVOLUTION.md | Фактическая готовность, две границы/исторические версии, расписание, команды retry, риск SMTP дубля/пределы Mailpit, будущий параллелизм |
+
+#### Команды и результаты
+
+`C` = реальный wrapper `/tmp/maddevs-smtp-compose`, выполняющий `docker compose -f compose.yaml -f /tmp/maddevs-smtp-ci.override.yaml` с COMPOSE_PROJECT_NAME=event-registration-relay-check-smtp-20261023, COMPOSE_ENV_FILES=.env.example, COMPOSE_PROFILES=test и всеми опубликованными портами=0. Override сбрасывает named mounts db/mailpit и заменяет их tmpfs; test-db/test-mailpit уже tmpfs. Собственные теги Core/Notifications event-registration-smtp-check-core:local / event-registration-smtp-check-notifications:local. Временный worker poll=0.2, relay cap=10/max attempts=20; временный sender poll=0.2/cap=2/max attempts=20 только для ускорения сетевых отказов. Обычные defaults 5/60/8 не изменены.
+
+| Проверка | Реальная команда | Итог |
+|---|---|---|
+| Compose config/build | `C config --quiet`; `C build api test notifications notifications-test bootstrap-test frontend`; после исправлений повторены Notifications/runtime/test images | PASS |
+| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py'` | PASS, 47 formatted / 29 Mypy files |
+| Полный Core/Alembic | `C run --rm test` | PASS, 160 passed, 10.73s, upgrade/round-trip/downgrade guards/check |
+| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS, 31 formatted / 15 Mypy files, повторено на финальном образе |
+| Полный Notifications/Alembic | `C run --rm notifications-test` | PASS, окончательные 94 passed, 4.03s, upgrade/round-trip/guard/check |
+| Infrastructure Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS, все 6 файлов |
+| Полный infrastructure | `C run --rm bootstrap-test` | PASS, 11 passed, 18.16s до последнего изменения диагностики; окончательное повторение зафиксировано ниже |
+| Frontend | `C build frontend`; `docker run --rm --network none event-registration-hol-check-frontend-build:local npm run build` | PASS, тот же неизменённый frontend; tsc --noEmit/Vite, 17 modules, 969ms |
+| Полный runtime | `C up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications notifications-sender`; финально `C up --no-build --no-deps -d --wait --wait-timeout 60 notifications notifications-sender` | PASS |
+| Runtime migrations | `C exec -T api alembic check`; `C exec -T notifications alembic check` | PASS, no new upgrade operations |
+| Прежний real HTTP/TCP CI smoke | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-smtp-20261023 worker python - PHASE < infrastructure/checks/relay_smoke.py` | PASS: create/outage/recover/lost-response/recover + stop/kill/up/restart, как в CI |
+| Новый real SMTP CI smoke | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-smtp-20261023 notifications-sender python - PHASE < infrastructure/checks/smtp_smoke.py` | PASS: recover/outage/recover/lost-response/recover, Mailpit pause/unpause, SIGKILL sender, restart API/sender; последний recover повторён на финальном образе |
+| Runtime DB/health/изоляция | `C exec -T api python -`; `C exec -T notifications python -` с SELECT; docker inspect тестовых IDs и проверки логов; curl `/api/health` через frontend и Notifications `/health` | PASS: 24/7 колонок, 4 forwarded/4 будущих pending Core; 4 sent Notifications/4 Mailpit copies, all MIME; оба health200, 4 data stores tmpfs |
+| Неприкосновенность бизнес-кода/контрактов/миграций/UI | `git diff --exit-code -- backend/app/services backend/app/api backend/app/notifications backend/migrations notifications/migrations frontend`; `git diff --check` | PASS |
+
+Основная БД/volumes не использовались, строки не удалялись/не мигрировали этим этапом. Очистка тестовых fixtures затрагивает только специально созданные *_test строки, Mailpit рабочей установки не очищается. Новых миграций нет. Ошибки первых прогонов исправлены, проверки не отключены. Удалённый GitHub Actions не запускался: выполнены его локальные команды и реальные HTTP/SMTP сетевые шаги.
+
+Важные ограничения: после Core freeze письмо остаётся историческим снимком даже при отмене до MIME; протокол v1 не умеет отзывать принятые задания. Доставка не оживляет отменённое участие. SMTP accept + потерянный ответ/crash до sent может дать физический повтор; локальная дедупликация Mailpit по Message-ID не является exactly-once и зависит от наличия записи/настроек/хранилища. После лимита нужен явный retry. Один sender, без leases/масштабирования; нет нового UI/SSE. Коммит/push не выполнялись.
+
+Контроль окончательных тестов `2026-10-23T10:02:57+05:00`: повторный infrastructure прогон завершён **11 passed (14.96s)**. Итого **265 уникальных Pytest-тестов, 0 skipped**: 160 Core + 94 Notifications + 11 infrastructure. Все статические проверки, runtime migrations/health и сетевые сценарии успешны; реальное SMTP содержимое совпало с frozen MIME.
+
+Завершение `2026-10-23T10:03:54+05:00`: финальная проверка логов worker/sender без неожиданных iteration failures; docker inspect подтвердил четыре tmpfs-хранилища без named mounts и paused-контейнеров. `C down --remove-orphans` завершился exit 0 без --volumes; удалены только временные контейнеры/сеть. git diff --stat показан: 18 tracked файлов плюс отдельно перечислены 12 новых untracked файлов; diff --check успешен. Основная БД/volumes не затронуты. Коммит/push отсутствуют; работа остановлена после SMTP-этапа.
+
+
+### Повреждённый MIME не блокирует sender — 2026-10-23
+
+- `2026-10-23T13:47:32+05:00`: проверены git status/diff и актуальные load_prepared/Sender/тесты. Существующие незакоммиченные изменения SMTP-этапа сохранены; новая задача не меняет схему, публичные контракты или бизнес-операции.
+- `2026-10-23T13:48:51+05:00`: новые unit-регрессии запущены **до исправления**. Все 7 ожидаемо упали: реальные From/To со значениями `"` и `a@[` вызывают IndexError/AttributeError при ленивом get_all; дополнительно проверены три явно заданных parser exception. Это отрицательный контроль старой реализации, не отключённые проверки.
+- `2026-10-23T13:50:39+05:00`: в load_prepared добавлен локальный try/except только для IndexError, AttributeError, HeaderParseError с преобразованием в безопасный ValueError("Invalid prepared MIME"). Guard включает parsebytes и ленивый разбор при чтении заголовков. После исправления **18 MIME unit-тестов passed (0.10s)**, Ruff/format/strict Mypy исходников успешны.
+- `2026-10-23T13:51:32+05:00`: полный Core **160 passed (13.39s)**, Alembic upgrade/check и существующие round-trip/guard tests; Core Ruff/format/Mypy PASS.
+- `2026-10-23T13:53:08+05:00`: инфраструктурный набор **11 passed (16.19s)** на test-db/test-mailpit; bootstrap/изоляция/SMTP/отмена/восстановление/переносы не нарушены. Infrastructure Ruff/format/Mypy PASS. Образы пересобраны; установка прежних test-deps заняла время из-за скачивания, новых зависимостей нет.
+- `2026-10-23T13:53:50+05:00`: весь Notifications **105 passed (4.70s)**; Ruff/format/Mypy PASS, Alembic check no new upgrade operations. Итого **276 уникальных Pytest-тестов, 0 skipped**: 160 Core + 105 Notifications + 11 infrastructure.
+
+Изменены в рамках этого исправления только notifications/notifications_app/mime.py, notifications/tests/unit/test_mime.py, notifications/tests/integration/test_sender.py и этот журнал. Sender не редактировался: его прежняя обработка ValueError фиксирует failed + last_error="Invalid stored payload or MIME" и возвращает управление для следующего прохода. Общего except Exception в sender не добавлено.
+
+Добавлены 11 сценариев: 4 unit на повреждённые From/To; 3 unit на преобразование типов ошибок parser; 4 PostgreSQL-регрессии очереди. В каждой DB-регрессии плохое задание выбирается первым, становится failed, его payload/MIME/attempts/available_at не меняются, SMTP hook и renderer для него не вызываются; следующее корректное задание получает sent и единственный SMTP-вызов. Повторный проход не выбирает failed снова. Диагностика остаётся постоянным безопасным текстом, без адресов/токенов. MIME не пересоздаётся.
+
+Реальные команды (C=/tmp/maddevs-smtp-compose, тот же изолированный project event-registration-relay-check-smtp-20261023 с tmpfs и отдельными image tags, описанный в SMTP-этапе выше):
+
+| Проверка | Команда | Итог |
+|---|---|---|
+| Config/build | `C config --quiet`; `C build api test notifications notifications-test bootstrap-test` | PASS |
+| Отрицательный контроль | из notifications: `../backend/.venv/bin/pytest -q tests/unit/test_mime.py -k 'damaged_address or parser_errors'` до исправления | 7 expected failures, дефект воспроизведён |
+| Unit после исправления | из notifications: `../backend/.venv/bin/pytest -q tests/unit/test_mime.py` | 18 passed, 0.10s |
+| Полный Core | `C run --rm test` | 160 passed, 13.39s; migrations/check PASS |
+| Полный infrastructure | `C run --rm bootstrap-test` | 11 passed, 16.19s; настоящие PostgreSQL/Mailpit |
+| Полный Notifications | `C run --rm notifications-test` | 105 passed, 4.70s; migrations/check PASS |
+| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py'` | PASS, 47/29 файлов |
+| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS, 31/15 файлов |
+| Infrastructure Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS, 6 файлов |
+| Сохранность Core/старых миграций/UI | `git diff --exit-code -- backend/app/services backend/app/api backend/app/notifications backend/migrations notifications/migrations frontend`; `git diff --check` | PASS |
+
+Основные данные и volumes не использовались; runtime основной установки не запускался/не останавливался. Тесты не отключались. Удалённый GitHub Actions не запускался. Коммит/push не выполнялись.
+
+Завершение `2026-10-23T13:55:10+05:00`: docker inspect подтвердил tmpfs и отсутствие named mounts у test-db/test-mailpit изолированного проекта. `C down --remove-orphans` exit 0 без --volumes; временные контейнеры/сеть удалены. Существующая работа сохранена. Git diff --stat показан, включает предыдущий SMTP-этап и не учитывает untracked файлы; diff --check успешен. Коммита/push нет.

@@ -26,7 +26,7 @@ async def run() -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
-    logger.info("Core HTTP relay started (one sequential process); SMTP is not implemented")
+    logger.info("Core HTTP relay started (one sequential process); SMTP belongs to Notifications")
     try:
         async with httpx.AsyncClient(
             trust_env=False, limits=httpx.Limits(max_connections=1, max_keepalive_connections=1)

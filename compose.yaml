@@ -24,7 +24,7 @@ x-notifications: &notifications
   build:
     context: ./notifications
     target: runtime
-  environment:
+  environment: &notifications-environment
     DATABASE_URL: postgresql+asyncpg://${NOTIFICATIONS_DB_USER:-notifications_app}:${NOTIFICATIONS_DB_PASSWORD:-local_notifications_password_change_me}@db:5432/${NOTIFICATIONS_DB:-event_notifications}
     NOTIFICATIONS_INTERNAL_TOKEN: ${NOTIFICATIONS_INTERNAL_TOKEN:-local_notifications_internal_token_change_me_32_chars}
 
@@ -95,6 +95,27 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  notifications-sender:
+    <<: *notifications
+    command: ["python", "-m", "notifications_app.worker"]
+    environment:
+      <<: *notifications-environment
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: ${SMTP_FROM:-events@example.test}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:8080}
+      SENDER_TIMEOUT: ${SENDER_TIMEOUT:-5}
+      SENDER_POLL_INTERVAL: ${SENDER_POLL_INTERVAL:-5}
+      SENDER_MAX_ATTEMPTS: ${SENDER_MAX_ATTEMPTS:-8}
+      SENDER_BACKOFF_BASE: ${SENDER_BACKOFF_BASE:-1}
+      SENDER_BACKOFF_CAP: ${SENDER_BACKOFF_CAP:-60}
+    depends_on:
+      notifications-migrate:
+        condition: service_completed_successfully
+    init: true
+    stop_grace_period: 10s
+    restart: unless-stopped
+
   api:
     <<: *backend
     depends_on:
@@ -145,6 +166,7 @@ services:
     image: axllent/mailpit@sha256:23fe39e81bde596a918000b3135c0f85dc8bb4c9ea6be274b051143f3e300387
     environment:
       MP_DATABASE: /data/mailpit.db
+      MP_QUIET: "true"
       MP_IGNORE_DUPLICATE_IDS: "true"
       MP_MAX_MESSAGES: "0"
       MP_DISABLE_VERSION_CHECK: "true"
@@ -160,6 +182,24 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+
+  test-mailpit:
+    profiles: ["test"]
+    image: axllent/mailpit@sha256:23fe39e81bde596a918000b3135c0f85dc8bb4c9ea6be274b051143f3e300387
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_IGNORE_DUPLICATE_IDS: "true"
+      MP_MAX_MESSAGES: "0"
+      MP_DISABLE_VERSION_CHECK: "true"
+      MP_SMTP_DISABLE_RDNS: "true"
+      MP_QUIET: "true"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   test-db:
     profiles: ["test"]
@@ -216,17 +256,24 @@ services:
       DATABASE_URL: postgresql+asyncpg://notifications_app_test:notifications_database_password_local_only@test-db:5432/event_notifications_test
       TEST_DATABASE_URL: postgresql+asyncpg://notifications_app_test:notifications_database_password_local_only@test-db:5432/event_notifications_test
       TEST_CORE_DATABASE_URL: postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test
+      SMTP_HOST: test-mailpit
+      SMTP_PORT: "1025"
+      TEST_MAILPIT_URL: http://test-mailpit:8025
       NOTIFICATIONS_INTERNAL_TOKEN: test_notifications_internal_token_32_characters_minimum
     command: ["sh", "-c", "alembic upgrade head && pytest && alembic check"]
     depends_on:
       test-db-bootstrap:
         condition: service_completed_successfully
+      test-mailpit:
+        condition: service_healthy
 
   bootstrap-test:
     profiles: ["test"]
     build:
       context: ./backend
       target: bootstrap-test
+      additional_contexts:
+        notifications: ./notifications
     environment:
       <<: *test-bootstrap-environment
       TEST_CORE_DATABASE_URL: postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test
@@ -234,6 +281,9 @@ services:
       NOTIFICATIONS_INTERNAL_TOKEN: test_notifications_internal_token_32_characters_minimum
       PYTHONPATH: /app:/notifications
       MYPYPATH: /app:/notifications
+      SMTP_HOST: test-mailpit
+      SMTP_PORT: "1025"
+      TEST_MAILPIT_URL: http://test-mailpit:8025
     volumes:
       - ./infrastructure/postgres:/bootstrap:ro
       - ./infrastructure/tests:/bootstrap-tests:ro
@@ -244,6 +294,8 @@ services:
     depends_on:
       test-db-bootstrap:
         condition: service_completed_successfully
+      test-mailpit:
+        condition: service_healthy
 
 volumes:
   postgres-data:
