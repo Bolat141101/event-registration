@@ -51,6 +51,7 @@ async def test_health_does_not_expose_connection_errors(
     assert response.status_code == 503
     assert "private-password" not in response.text + caplog.text
     assert "SELECT secret" not in response.text + caplog.text
+    assert f"Notifications database readiness check failed ({type(error).__name__})" in caplog.text
 
 
 async def test_infrastructure_exposes_no_delivery_routes(client: AsyncClient) -> None:

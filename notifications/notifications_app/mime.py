@@ -11,6 +11,7 @@ from email.utils import format_datetime, parsedate_to_datetime
 from uuid import UUID
 
 from notifications_app.contract import NotificationMessage
+from notifications_app.email_addresses import canonical_email
 
 
 @dataclass(frozen=True)
@@ -22,17 +23,8 @@ class PreparedEmail:
 
 
 def mailbox(value: str) -> str:
-    # No display names, header injection, DNS, SMTPUTF8 or extra recipients.
-    if any(character in value for character in "\r\n\x00"):
-        raise ValueError("Invalid mailbox")
-    try:
-        address = Address(addr_spec=value)
-    except (HeaderParseError, ValueError) as exc:
-        raise ValueError("Invalid mailbox") from exc
-    if not address.username or not address.domain or not address.username.isascii():
-        raise ValueError("Invalid mailbox")
-    domain = address.domain.encode("idna").decode("ascii")
-    return Address(username=address.username, domain=domain).addr_spec
+    # Validation excludes display names, header injection and SMTPUTF8.
+    return canonical_email(value)
 
 
 def render(message: NotificationMessage, sender: str, public_url: str, now: datetime) -> bytes:
@@ -90,12 +82,15 @@ def load_prepared(message: NotificationMessage, data: bytes) -> PreparedEmail:
             or any(mail.get_all(name) for name in ("Cc", "Bcc", "Resent-To", "Resent-Bcc"))
         ):
             raise ValueError("Invalid prepared MIME")
-        sender = mailbox(str(mail["From"]))
-        recipient = mailbox(str(mail["To"]))
+        raw_sender, raw_recipient = str(mail["From"]), str(mail["To"])
+        if not raw_sender.isascii() or not raw_recipient.isascii():
+            raise ValueError("Non-ASCII prepared MIME envelope")
+        sender = mailbox(raw_sender)
+        recipient = mailbox(raw_recipient)
         date = parsedate_to_datetime(str(mail["Date"]))
         if (
             recipient != mailbox(message.payload.recipient)
-            or str(mail["Message-ID"])
+            or str(mail["Message-ID"]).lower()
             != f"<{message.message_id}@{Address(addr_spec=sender).domain}>"
             or date.tzinfo is None
         ):

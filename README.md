@@ -26,6 +26,8 @@
 
 `db-bootstrap` работает с существующим volume: создаёт отсутствующую вторую БД/обычные роли, изолирует доступ и адресно передаёт владельцев таблиц без изменения строк. POSTGRES_USER остаётся техническим администратором, не пользователем API. Подробные настройки, обновление и проверки — [docs/NOTIFICATIONS_INFRASTRUCTURE.md](docs/NOTIFICATIONS_INFRASTRUCTURE.md).
 
+Core больше не содержит SMTP_HOST/SMTP_PORT/SMTP_FROM: SMTP-настройки принадлежат только Notifications sender. Миграции Core: 0001 initial → 0002 simplify → 0003 forwarded → **0004 canonical_email**; Notifications — **0001_notification_jobs**. Старые revisions не редактируются; [preflight/IDNA/ограничения downgrade](docs/EMAIL_CANONICALIZATION.md).
+
 ## API текущего этапа
 
 Организатор передаёт `Authorization: Bearer <ORGANIZER_TOKEN>` из backend environment. Участник использует такой же заголовок со своим токеном. Секреты не передаются query-параметрами, ключ организатора не попадает в frontend bundle. Полноценные аккаунты и восстановление потерянной ссылки пока отсутствуют.
@@ -49,6 +51,10 @@
 Напоминание одно на всю жизнь регистрации, для confirmed и waitlisted; cancelled исключаются. Начальный срок starts_at − 24h, при позднем вступлении — сейчас. Перенос обновляет неподготовленное задание, отмена отменяет, resume реактивирует ту же строку. Prepared/sent не переписываются. Два фактических переноса, включая A → B → A, создают разные задания по schedule_version. Доставка в Mailpit реализована отдельным async sender; повтор после неизвестного SMTP-исхода использует прежний MIME/Message-ID. Ограничения дедупликации — [SMTP_DELIVERY.md](docs/SMTP_DELIVERY.md).
 
 Nginx в Docker повторно разрешает имя api через встроенный resolver (кэш 5 секунд), поэтому пересоздание API не оставляет proxy со старым IP до ручного перезапуска. Во время остановки API/обновления DNS возможен краткий 502. Проверка смены IP и восстановления приведена в DEVELOPMENT_LOG.md.
+
+## Канонизация email и миграция 0004
+
+Email хранится lowercase ASCII: email-validator возвращает IDNA2008/Punycode-домен без SMTPUTF8. `user@faß.de` и `user@xn--fa-hia.de` — одна регистрация; `user@fass.de` — другой адрес. Точки и `+суффиксы` сохраняются. Новая миграция 0004 сначала проверяет коллизии и останавливается без изменений при конфликте; сохранённые payload/MIME не переписывает. Перед обновлением выполните read-only preflight и сделайте резервную копию. [Политика, команды и ограничения downgrade](docs/EMAIL_CANONICALIZATION.md).
 
 ## Асинхронный доступ к PostgreSQL
 
@@ -93,6 +99,8 @@ Compose ждёт готовности PostgreSQL, выполняет db-bootstra
 - Почта: [http://localhost:8025](http://localhost:8025); SMTP внутри Compose — `mailpit:1025`, отправитель `events@example.test`.
 
 Порты можно изменить через `FRONTEND_PORT`, `MAILPIT_PORT` и `POSTGRES_PORT` в `.env`. PostgreSQL доступен локально на `127.0.0.1:5433` по умолчанию; межконтейнерный адрес остаётся `db:5432`. Дополнительные настройки API/worker перечислены в `backend/app/config.py`, передаются через environment сервиса; секрет организатора не встраивается во frontend.
+
+Диагностика конфигурации обоих сервисов скрывает DSN и токены из `repr(Settings)`. URL relay скрыт в Core, адрес отправителя/public URL — в Notifications. Текст `ValidationError` не показывает исходные значения. Ошибочный запуск API, worker, служебного CLI или Alembic завершается с ненулевым кодом: остаются traceback, имя поля и причина ошибки, например требование `postgresql+asyncpg` или минимальная длина токена. Runtime и Alembic скрывают SQL bind-параметры. Это защита текстовой диагностики; `model_dump()` и структурированный `ValidationError.errors()` могут содержать исходные значения, поэтому их нельзя выводить в логи.
 
 Успешный health:
 
@@ -168,6 +176,19 @@ Workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) запускает
 Сейчас работает один последовательный HTTP relay Core (`python -m app.worker`); Notifications сохраняет принятые задания, отдельный `notifications-sender` фиксирует MIME и отправляет через aiosmtplib в Mailpit. Relay использует httpx AsyncClient без открытой DB-транзакции, сохраняет попытки/backoff и помечает HTTP 202 как forwarded, а не sent. SMTP sender также один последовательный процесс; его запуск не зависит от HTTP API или доступности Mailpit. `sent` означает SMTP accept, не exactly-once. Для будущего роста предусмотрен [план конкурентной обработки](docs/WORKER_EVOLUTION.md): `FOR UPDATE SKIP LOCKED`, leases и идемпотентность добавляются в выбор/завершение outbox-задач. Регистрация и FIFO при этом остаются в прежних транзакциях. Эти механизмы, Redis и Celery сейчас не реализованы.
 
 Занятое мероприятие не блокирует всю рассылку: relay перебирает ограниченную страницу голов разных событий, пропускает недоступный event-lock через NOWAIT и возвращается к нему в следующем обходе. RELAY_CANDIDATE_LIMIT задаётся в .env (default 20). При полностью занятой странице worker делает паузу; участники FIFO и prepared payload остаются под прежними правилами.
+
+## Проверка backend перед frontend — 2026-10-23
+
+На отдельном Compose project с tmpfs PostgreSQL/Mailpit прошли Ruff, форматирование, Mypy, все **331 Pytest-тест (186 Core + 124 Notifications + 21 infrastructure)**, явные Alembic upgrade/downgrade base/upgrade/check обеих БД, сборка и запуск. API smoke подтвердил регистрацию/IDN-повтор, FIFO/отмену/resume, версии переноса, 422/401, однократный чекин и реальные письма. Все существующие HTTP/SMTP fault-сценарии CI выполнены: outage, SIGKILL/restart, потеря ответа после HTTP commit и SMTP accept, неизменность MIME, дедупликация в текущем Mailpit store. Два API-процесса проверяют гонки; отрицательные контроли подтверждают чувствительность email/security регрессий. Команды/границы и фактическое время — [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md). Основная установка не менялась; удалённый GitHub Actions этим не подтверждается.
+
+## Что остаётся перед сдачей
+
+Требования PDF и дополнительные решения разделены в REQUIREMENTS.md. Backend-поведение проверяется на PostgreSQL и через Core → Notifications → Mailpit; это не завершение всего кейса.
+
+- Frontend: список/детали событий, создание и перенос, регистрация с нейтральным ответом, приватная страница из email fragment с билетами/отказом/resume, экран организатора с тремя счётчиками и экран ручного чекина. Пока существует только health-каркас React.
+- Live: реализовать backend SSE endpoint, initial snapshot/heartbeat/reconnect и frontend hook без переноса бизнес-логики в браузер. REST-счётчики есть, SSE сейчас отсутствует.
+- Приёмка двумя клиентами: разные браузерные контексты одновременно претендуют на последнее место; отказ повышает первого ожидающего; один билет не отмечается дважды; у второго клиента счётчики/дата меняются без reload, после разрыва сети состояние восстанавливается. Тесты двух API-процессов не заменяют эту приёмку.
+- Сдача: проверить свежий clone по README и GitHub-доступность, согласовать коммиты/push, уточнить фактическую модель, завершить описание улучшений и отдельное эссе из 10 предложений. Эссе — указание пользователя, в PDF его нет.
 
 ## Решения, происхождение и AI
 

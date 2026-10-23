@@ -243,3 +243,45 @@
 | Отдельный test-mailpit tmpfs, обычные test DB роли | Никаких основных данных/volumes; реальный SMTP в PostgreSQL интеграционных тестах. Только infrastructure test target устанавливает Notifications runtime lock через build context | Все три последовательных набора, bootstrap/изоляция/права, полные локальные CI-проверки |
 
 Новые сущности, Redis, Kafka, Celery, распределённые leases, DB-триггеры неизменности, отменяющий HTTP-протокол и новые API-маршруты не добавлены. Полный контракт/риски и ручной retry: [docs/SMTP_DELIVERY.md](docs/SMTP_DELIVERY.md). После исчерпания бюджета автоматической гарантии eventual delivery нет: требуется вмешательство. Exactly-once SMTP не обещается.
+
+
+## Канонизация IDNA и идентичность email — 2026-10-23
+
+Контрольная отметка `2026-10-23T15:51:52+05:00`. Пользователь подтвердил ошибки faß→fass и разные регистрации Unicode/Punycode; разрешил исправление и новую миграцию с предварительной проверкой коллизий. Перед работой дерево чистое, HEAD 57aab8b. Основная установка проверена READ ONLY: 0 регистраций/коллизий; upgrade к ней не применялся.
+
+| Решение | Причина / компромисс | Проверка |
+|---|---|---|
+| email-validator 2.3.0 ascii_email, без SMTPUTF8/DNS, прежний lowercase | Python IDNA2003 codec терял ß; Unicode и A-label должны давать один ASCII-адрес. Не casefold, точки/+суффиксы сохраняются | faß→xn--fa-hia, fass отдельно; ASCII/IDN/регистр/повторы и 2 API-процесса |
+| Одна canonical_email функция в каждом независимом сервисе | Core использует до lookup и в ORM; Notifications — в renderer/проверке envelope. Нет общей бизнес-библиотеки/межбазового доступа | Кросс-сервисный тест шести эталонов; реальная SMTP RCPT без SMTPUTF8 |
+| HTTP DTO/payload не канонизируются повторно при приёме | Legacy JSON должен оставаться прежним для commit-before-ACK/retry; нельзя превратить потерянный ответ в конфликт | Старый Unicode payload сохраняется, новый MIME/RCPT ASCII; frozen MIME не пересериализуется |
+| В каждом retry сравнивать canonical To с canonical payload | Старый MIME с fass при payload faß отправит не тому домену. Не исправлять frozen bytes | Unsafe → failed/нет SMTP/следующий sent; manual retry отклонён, JSON/MIME/attempts/срок сохранены |
+| Non-ASCII frozen From/To отклоняются, ASCII-регистр допустим | Не ремонтировать сохранённый envelope и не включать SMTPUTF8. Message-ID сравнивается с учётом регистронезависимого ASCII-домена, но его байты не меняются | Legacy ASCII с uppercase From/To/Message-ID domain остаётся неизменным |
+| Read-only email_audit CLI + новая 0004 с повторным аудитом под ACCESS EXCLUSIVE | Сначала диагностировать, затем мигрировать стабильный набор; коллизии учитывают cancelled и event scope. При проблеме abort до первого UPDATE | Guard collision/invalid с полным rollback; IDs-only диагностика; audit не меняет строки |
+| UPDATE только registrations.email, ASCII CHECK, прежний UNIQUE | Сохраняются 3/24 колонки, ID/билеты/токены/FIFO/версии; ни outbox, ни Notifications не мигрируют | Миграция заполненной БД, snapshots всех остальных полей/outbox, raw Unicode SQL отклонён |
+| Downgrade снимает только ASCII CHECK, не деканонизирует строки | Исходное Unicode/Punycode написание не хранится; угадывать его нельзя. Для полного возврата нужен backup | upgrade/downgrade/upgrade/check на PostgreSQL, безопасный abort при коллизии |
+| Alembic engine hide_parameters=True | Не показывать email в bind-параметрах неожиданной ошибки миграции; прежние revision-файлы не редактируются | Ruff/Mypy/миграционные тесты; git diff старых revisions пуст |
+
+Core остаётся источником бизнес-истины; FIFO, READ COMMITTED/event-lock, билеты, токены, HTTP JSON v1 и две границы фиксации не меняются. Уже доставленное неверное письмо отозвать нельзя; sent автоматически не пересылается. Основная установка не обновлена; перед реальным upgrade нужен backup/audit и остановка старых writers. [Политика и команды](docs/EMAIL_CANONICALIZATION.md).
+
+## Диагностика конфигурации без секретов — 2026-10-23
+
+Контрольная отметка `2026-10-23T16:07:17+05:00`. Существующие изменения IDNA сохранены; текущая задача не меняет бизнес-правила, данные или схему.
+
+- Core использует `hide_input_in_errors=True`, как Notifications: текст и repr ValidationError не показывают исходные значения. Сохраняются имя поля, причина и код ошибки; startup завершается с ошибкой, исключения не подавляются.
+- DSN и токены исключены из repr Settings обоих сервисов. В Core также исключены адрес отправителя и Notifications URL, который может содержать credentials; у Notifications адрес и public URL уже были скрыты. Типы PostgresDsn/SecretStr и доступ к значениям для соединений/авторизации остаются прежними.
+- Notifications Alembic engine получает hide_parameters=True, как Core и оба runtime engine. Старые revision-файлы и миграционные операции не меняются.
+- Проверяется фактический stderr дочерних процессов Uvicorn factory, worker, operator CLI и Alembic каждого сервиса с вымышленными секретами и невалидной конфигурацией, до любых сетевых соединений. Health caplog проверяет реальные обработчики ошибки БД. Дополнительного общего catch/слоя логирования нет.
+- hide_input_in_errors защищает форматированный текст, а repr=False — представление модели. Они не очищают model_dump/errors()/json(); такие структуры не логируются. Системы, автоматически собирающие locals/env, требуют отдельной настройки и не входят в обычный startup traceback приложения.
+
+## Финальная сверка backend перед frontend — 2026-10-23
+
+Контрольная отметка `2026-10-23T16:30:50+05:00`. Исходный PDF повторно прочитан: общие требования (стр. 1–2) и весь кейс №9 (стр. 9), SHA-256 прежний 3b7934746efef38066c6164c68df93ee6a0175c7ac7af8472372537a609539d7. Старые записи выше — история решений, не текущий список недоделок.
+
+- Удалены неиспользуемые smtp_host/smtp_port/smtp_from из Core Settings и SMTP_HOST/PORT/FROM из x-backend environment Compose. Поиск всех обращений показал только объявления и устаревшие repr assertions; реальная SMTP-доставка использует только Notifications Settings. Её SMTP-настройки/Compose/.env.example остаются. Core конфигурационный тест проверяет оставшийся безопасный relay_timeout; защита DSN/токенов сохранена.
+- Актуальные миграции: Core 0004_canonical_email (24 поля), Notifications 0001_notification_jobs (7 полей). Здесь новых миграций нет; 0001–0003 Core/Notifications revision-файлы не меняются. Read-only preflight и отказ при IDNA-коллизиях остаются обязательными при обновлении существующего набора.
+- Исправлены текущие архитектурные утверждения: SMTP реализован, работают один Core relay + один Notifications sender, HTTP202 → forwarded; sent означает SMTP accept в Notifications (Core legacy sent сохраняется). Разные границы неизменности payload/MIME и риск SMTP-дубликата не меняются.
+- PDF требует результат регистрации/FIFO/билетов/почты/однократного чекина/live и работу двух клиентов. Core+Notifications, SSE, management tokens/resume, версии, IDNA и Mailpit — наши дополнительные согласованные решения; эссе из 10 предложений — отдельное указание пользователя. PDF не требует именно микросервисы или транспорт SSE.
+- Успешная проверка backend не закрывает C06/C07/C15/G11: отсутствуют пользовательские экраны, SSE endpoint и приёмка двух браузеров. Сейчас frontend не изменяется. Сравнения технологий в §12 архитектуры сохранены как исходный анализ; последующий Core+Notifications приоритетен.
+- Регрессии проверяются не только чтением: в disposable копиях внутри контейнеров возвращены старые дефекты. Core trim/lower-only выявлен 3 падениями, Notifications IDNA2003 — 2; раскрытие repr/input — 5 Core и 4 Notifications. Это ожидаемые отрицательные контроли, не отключённые тесты: рабочие файлы не менялись, основной полный набор должен проходить.
+
+Проверка к `2026-10-23T16:39:52+05:00`: 331 обычный Pytest passed/0 skipped, все Ruff/format/Mypy, обе миграционные CLI round-trip/check, штатный Compose startup, полный API smoke и исходные CI HTTP/SMTP fault-сценарии успешны. Runtime — Core 24 поля/head0004, Notifications 7/head0001, 13 accepted/sent frozen MIME, нет failed. Временные tmpfs-контейнеры удалены без volumes. Это подтверждение backend-сценариев, а не закрытие UI/live/PDF целиком.

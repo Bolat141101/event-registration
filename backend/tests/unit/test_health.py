@@ -40,12 +40,16 @@ async def test_health_rejects_stale_schema(client: AsyncClient) -> None:
     assert response.json() == {"status": "unavailable", "database": "unavailable"}
 
 
-async def test_database_error_does_not_expose_credentials(client: AsyncClient) -> None:
-    error = OperationalError("SELECT 1", {}, Exception("password=private-password"))
+async def test_database_error_does_not_expose_credentials(
+    client: AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    error = OperationalError("SELECT fake-secret-token", {}, Exception("password=private-password"))
     with patch("app.api.health.database_is_ready", side_effect=error):
         response = await client.get("/api/health")
     assert response.status_code == 503
-    assert "private-password" not in response.text
+    assert "private-password" not in response.text + caplog.text
+    assert "fake-secret-token" not in response.text + caplog.text
+    assert "Database readiness check failed" in caplog.text
 
 
 @pytest.mark.parametrize("error", [TimeoutError("private timeout"), OSError("private connection")])

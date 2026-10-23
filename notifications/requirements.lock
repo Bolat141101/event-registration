@@ -30,6 +30,14 @@ click==8.5.0
     # via
     #   -c ../backend/requirements.lock
     #   uvicorn
+dnspython==2.9.0
+    # via
+    #   -c ../backend/requirements.lock
+    #   email-validator
+email-validator==2.3.0
+    # via
+    #   -c ../backend/requirements.lock
+    #   event-notifications (pyproject.toml)
 fastapi==0.150.0
     # via
     #   -c ../backend/requirements.lock
@@ -46,6 +54,7 @@ idna==3.20
     # via
     #   -c ../backend/requirements.lock
     #   anyio
+    #   email-validator
 mako==1.4.3
     # via
     #   -c ../backend/requirements.lock

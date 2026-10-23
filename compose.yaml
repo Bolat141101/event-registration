@@ -8,9 +8,6 @@ x-backend: &backend
   environment: &backend-environment
     DATABASE_URL: postgresql+asyncpg://${CORE_DB_USER:-core_app}:${CORE_DB_PASSWORD:-local_core_password_change_me}@db:5432/${POSTGRES_DB:-event_registration}
     ORGANIZER_TOKEN: ${ORGANIZER_TOKEN:?Set ORGANIZER_TOKEN in .env}
-    SMTP_HOST: mailpit
-    SMTP_PORT: "1025"
-    SMTP_FROM: events@example.test
 
 x-bootstrap: &bootstrap
   image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24

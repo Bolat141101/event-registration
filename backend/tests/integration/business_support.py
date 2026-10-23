@@ -10,6 +10,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.models import EmailOutbox, Event, Registration
+from app.email_addresses import canonical_email
 from app.services import checkins, events, registrations
 from app.services.common import EventView, RegistrationView
 from app.services.errors import DomainError
@@ -54,7 +55,7 @@ class Business:
                 await session.scalars(
                     select(Registration).where(
                         Registration.event_id == event_id,
-                        Registration.email == email.strip().lower(),
+                        Registration.email == canonical_email(email),
                     )
                 )
             ).one()

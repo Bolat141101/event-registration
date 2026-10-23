@@ -19,6 +19,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
 
+from app.email_addresses import canonical_email
+
 
 class Base(DeclarativeBase):
     metadata = MetaData(
@@ -76,7 +78,8 @@ class Registration(Base):
         CheckConstraint("status IN ('confirmed', 'waitlisted', 'cancelled')", name="valid_status"),
         CheckConstraint("participation_no > 0", name="positive_participation_no"),
         CheckConstraint(
-            "email = lower(btrim(email)) AND email <> ''",
+            "email = lower(btrim(email)) AND email <> '' "
+            "AND octet_length(email) = char_length(email)",
             name="normalized_email",
         ),
         CheckConstraint(
@@ -119,7 +122,7 @@ class Registration(Base):
 
     @validates("email")
     def normalize_email(self, _key: str, value: str) -> str:
-        return value.strip().lower()
+        return canonical_email(value)
 
 
 class EmailOutbox(Base):

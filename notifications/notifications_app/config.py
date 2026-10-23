@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore", hide_input_in_errors=True)
 
     database_url: PostgresDsn = Field(repr=False)
-    notifications_internal_token: SecretStr = Field(min_length=32)
+    notifications_internal_token: SecretStr = Field(min_length=32, repr=False)
 
     smtp_host: str = Field(default="mailpit", min_length=1)
     smtp_port: int = Field(default=1025, ge=1, le=65535)

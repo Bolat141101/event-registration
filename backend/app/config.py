@@ -3,16 +3,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore", hide_input_in_errors=True)
 
-    database_url: PostgresDsn
-    organizer_token: SecretStr = Field(min_length=32)
-    smtp_host: str = "mailpit"
-    smtp_port: int = Field(default=1025, ge=1, le=65535)
-    smtp_from: str = "events@example.test"
+    database_url: PostgresDsn = Field(repr=False)
+    organizer_token: SecretStr = Field(min_length=32, repr=False)
     worker_poll_interval: float = Field(default=5.0, gt=0, le=60)
-    notifications_url: AnyHttpUrl = AnyHttpUrl("http://notifications:8000")
-    notifications_internal_token: SecretStr | None = Field(default=None, min_length=32)
+    notifications_url: AnyHttpUrl = Field(
+        default=AnyHttpUrl("http://notifications:8000"), repr=False
+    )
+    notifications_internal_token: SecretStr | None = Field(default=None, min_length=32, repr=False)
     relay_timeout: float = Field(default=5, gt=0, le=30)
     relay_max_attempts: int = Field(default=8, ge=1, le=100)
     relay_backoff_base: float = Field(default=1, gt=0, le=60)

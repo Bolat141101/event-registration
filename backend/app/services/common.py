@@ -3,11 +3,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from email_validator import EmailNotValidError, validate_email
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Event, Registration, RegistrationStatus
+from app.email_addresses import canonical_email
 from app.services.errors import Conflict, InvalidInput, NotFound, Unauthorized
 
 
@@ -35,15 +35,10 @@ class RegistrationView:
 
 
 def normalize_email(value: str) -> str:
-    normalized = value.strip().lower()
     try:
-        # Local operation: no DNS/API requests. .test domains work in Mailpit.
-        validate_email(
-            normalized, check_deliverability=False, test_environment=True, allow_smtputf8=False
-        )
-    except EmailNotValidError as exc:
+        return canonical_email(value)
+    except ValueError as exc:
         raise InvalidInput("invalid_email", "Укажите корректный email") from exc
-    return normalized
 
 
 def token_hash(token: str) -> str:

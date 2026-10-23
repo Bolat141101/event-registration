@@ -80,9 +80,11 @@ class Pipeline:
         self.event_ids.append(event.id)
         return event
 
-    async def join(self, event: EventView) -> tuple[UUID, str]:
+    async def join(
+        self, event: EventView, email: str = "pipeline@example.test"
+    ) -> tuple[UUID, str]:
         async with async_sessionmaker(self.core)() as session:
-            await registrations.register(session, event.id, "pipeline@example.test", self.clock)
+            await registrations.register(session, event.id, email, self.clock)
         async with async_sessionmaker(self.core)() as session:
             message = await session.scalar(
                 select(EmailOutbox)
@@ -287,3 +289,47 @@ async def test_smtp_retry_after_business_change_preserves_prepared_mime(
     after = await pipeline.job(identity)
     assert after is not None and after.status == "sent" and after.attempts == 2
     assert after.mime == before.mime and after.payload == before.payload
+
+
+@pytest.mark.parametrize(
+    "address,expected",
+    [
+        ("USER@faß.de", "user@xn--fa-hia.de"),
+        ("user@xn--fa-hia.de", "user@xn--fa-hia.de"),
+        ("Some.One+Tag@EXAMPLE.test", "some.one+tag@example.test"),
+        ("user@fass.de", "user@fass.de"),
+    ],
+)
+async def test_canonical_address_core_payload_mime_and_real_mailpit(
+    pipeline: Pipeline, address: str, expected: str
+) -> None:
+    event = await pipeline.create()
+    identity, _ = await pipeline.join(event, address)
+    await pipeline.flush()
+    async with async_sessionmaker(pipeline.core)() as session:
+        person = await session.scalar(select(Registration).where(Registration.event_id == event.id))
+        assert person is not None and person.email == expected
+        message = await session.get(EmailOutbox, identity)
+        assert message is not None and message.payload["payload"]["recipient"] == expected
+        assert message.status == "forwarded"
+        envelope = message.payload
+    row = await pipeline.job(identity)
+    assert row is not None and row.status == "sent" and row.mime and row.payload == envelope
+    frozen = BytesParser(policy=policy.default).parsebytes(row.mime)
+    assert str(frozen["To"]) == expected
+    async with httpx.AsyncClient(base_url=os.environ["TEST_MAILPIT_URL"], trust_env=False) as http:
+        listing = (await http.get("/api/v1/messages?limit=1000")).json()["messages"]
+        received = []
+        for item in listing:
+            data = (await http.get(f"/api/v1/message/{item['ID']}/raw")).content
+            if str(identity).encode() in data:
+                received.append(BytesParser(policy=policy.default).parsebytes(data))
+        assert len(received) == 1 and str(received[0]["To"]) == expected
+        assert received[0].get_payload(decode=True) == frozen.get_payload(decode=True)
+        # Mailpit recipient metadata matches; SMTP RCPT is asserted in test_smtp.
+        entry = next(
+            item
+            for item in listing
+            if item["ID"] and str(identity) in str(item.get("MessageID", ""))
+        )
+        assert entry["To"][0]["Address"] == expected

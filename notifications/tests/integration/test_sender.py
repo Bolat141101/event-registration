@@ -443,3 +443,94 @@ async def test_damaged_mime_fails_without_smtp_and_next_job_is_sent(
             await session.execute(
                 delete(NotificationJob).where(NotificationJob.id == good.message_id)
             )
+
+
+async def test_unsafe_legacy_idn_mime_is_failed_without_rewrite_or_queue_blocking(
+    integration_engine: AsyncEngine, command: NotificationMessage, sender_settings: Settings
+) -> None:
+    clock = Clock()
+    sessions = async_sessionmaker(integration_engine, expire_on_commit=False)
+    legacy = command.model_copy(
+        update={"payload": command.payload.model_copy(update={"recipient": "user@faß.de"})}
+    )
+    frozen = render(legacy, "events@example.test", "http://localhost:8080", clock())
+    frozen = frozen.replace(b"user@xn--fa-hia.de", b"user@fass.de")
+    good = message()
+    async with sessions() as session, session.begin():
+        row = await session.get(NotificationJob, command.message_id)
+        assert row is not None
+        row.payload = legacy.model_dump(mode="json")
+        row.mime = frozen
+        row.attempts = 1
+        row.available_at = clock.now - timedelta(seconds=2)
+        session.add(
+            NotificationJob(
+                id=good.message_id,
+                payload=good.model_dump(mode="json"),
+                available_at=clock.now - timedelta(seconds=1),
+            )
+        )
+    sent: list[PreparedEmail] = []
+
+    async def deliver(email: PreparedEmail) -> None:
+        sent.append(email)
+
+    sender = Sender(sessions, sender_settings, deliver, clock)
+    before = await stored(integration_engine, command.message_id)
+    try:
+        assert await sender.run_once()
+        assert not sent
+        row = await stored(integration_engine, command.message_id)
+        assert row.status == JobStatus.FAILED and row.last_error == "Invalid stored payload or MIME"
+        assert (row.mime, row.payload, row.attempts, row.available_at) == (
+            before.mime,
+            before.payload,
+            before.attempts,
+            before.available_at,
+        )
+        assert await sender.run_once()
+        assert len(sent) == 1 and sent[0].identity == good.message_id
+        assert (await stored(integration_engine, good.message_id)).status == JobStatus.SENT
+        with pytest.raises(ValueError):
+            await retry_failed(sessions, command.message_id, clock)
+        assert (await stored(integration_engine, command.message_id)).mime == frozen
+    finally:
+        async with sessions() as session, session.begin():
+            await session.execute(
+                delete(NotificationJob).where(NotificationJob.id == good.message_id)
+            )
+
+
+@pytest.mark.parametrize("has_mime", [False, True])
+async def test_legacy_unicode_payload_is_accepted_without_rewrite_and_smtp_uses_ascii(
+    integration_engine: AsyncEngine,
+    command: NotificationMessage,
+    sender_settings: Settings,
+    has_mime: bool,
+) -> None:
+    clock = Clock()
+    sessions = async_sessionmaker(integration_engine, expire_on_commit=False)
+    legacy = command.model_copy(
+        update={"payload": command.payload.model_copy(update={"recipient": "user@faß.de"})}
+    )
+    frozen = (
+        render(legacy, "events@example.test", "http://localhost:8080", clock())
+        if has_mime
+        else None
+    )
+    async with sessions() as session, session.begin():
+        row = await session.get(NotificationJob, command.message_id)
+        assert row is not None
+        row.payload = legacy.model_dump(mode="json")
+        row.mime = frozen
+    delivered: list[PreparedEmail] = []
+
+    async def deliver(email: PreparedEmail) -> None:
+        delivered.append(email)
+
+    assert await Sender(sessions, sender_settings, deliver, clock).run_once()
+    assert len(delivered) == 1 and delivered[0].recipient == "user@xn--fa-hia.de"
+    row = await stored(integration_engine, command.message_id)
+    assert row.status == JobStatus.SENT and row.payload == legacy.model_dump(mode="json")
+    if has_mime:
+        assert row.mime == frozen

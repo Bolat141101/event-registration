@@ -110,3 +110,58 @@ async def test_real_mailpit_accept_then_local_crash_retry_has_same_message_id(
             len(matched) == 1
         )  # Only this retained Mailpit store/config; not generic SMTP exactly-once.
         assert before.mime.split(b"\r\n\r\n", 1)[1] in matched[0]
+
+
+async def test_actual_smtp_envelope_uses_idna2008_and_persisted_mime(
+    integration_engine: AsyncEngine, command: NotificationMessage, sender_settings: Settings
+) -> None:
+    from notifications_app.models import NotificationJob
+
+    sessions = async_sessionmaker(integration_engine, expire_on_commit=False)
+    legacy = command.model_copy(
+        update={"payload": command.payload.model_copy(update={"recipient": "User@faß.de"})}
+    )
+    async with sessions() as session, session.begin():
+        row = await session.get(NotificationJob, command.message_id)
+        assert row is not None
+        row.payload = legacy.model_dump(mode="json")
+    commands: list[bytes] = []
+    payloads: list[bytes] = []
+
+    async def receive(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            writer.write(b"220 test SMTP\r\n")
+            await writer.drain()
+            while line := await reader.readline():
+                commands.append(line)
+                if line.startswith(b"EHLO"):
+                    writer.write(b"250-test\r\n250 SIZE 1000000\r\n")
+                elif line.startswith(b"DATA"):
+                    writer.write(b"354 send data\r\n")
+                    await writer.drain()
+                    payloads.append((await reader.readuntil(b"\r\n.\r\n"))[:-3])
+                    writer.write(b"250 accepted\r\n")
+                else:
+                    writer.write(b"250 OK\r\n")
+                await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(receive, "127.0.0.1", 0)
+    config = sender_settings.model_copy(
+        update={
+            "smtp_host": "127.0.0.1",
+            "smtp_port": server.sockets[0].getsockname()[1],
+            "sender_timeout": 3,
+        }
+    )
+    async with server:
+        assert await Sender(
+            sessions, config, partial(send_email, settings=config), Clock()
+        ).run_once()
+    assert b"RCPT TO:<user@xn--fa-hia.de>\r\n" in commands
+    assert all(b"SMTPUTF8" not in line for line in commands)
+    row = await stored(integration_engine, command.message_id)
+    assert row.status == JobStatus.SENT and row.payload == legacy.model_dump(mode="json")
+    assert row.mime == payloads[0] and b"To: user@xn--fa-hia.de\r\n" in payloads[0]

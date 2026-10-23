@@ -66,7 +66,7 @@ notification_jobs:
 
 Семь колонок; status — pending/sent/failed, attempts >= 0, payload — JSON-объект, непустой MIME при наличии, sent требует MIME. Частичный индекс pending по available_at/id. Нет recipient/kind/версий отдельными колонками: они входят в типизированный payload. PK вместе с INSERT ON CONFLICT и сравнением нормализованного JSON обеспечивает идемпотентный приём; SMTP отдельно реализован sender, а не самим наличием колонок.
 
-Notifications имеет собственный alembic_version и revision `0001_notification_jobs`; Core использует `0003_outbox_forwarded`. Downgrade Notifications на base разрешён только при пустой notification_jobs; при наличии заданий он явно останавливается, чтобы не уничтожить данные. На рабочей БД downgrade не запускать.
+Notifications имеет собственный alembic_version и revision `0001_notification_jobs`; Core использует `0004_canonical_email` (предыдущие revisions сохранены); [проверка коллизий](EMAIL_CANONICALIZATION.md). Downgrade Notifications на base разрешён только при пустой notification_jobs; при наличии заданий он явно останавливается, чтобы не уничтожить данные. На рабочей БД downgrade не запускать.
 
 ## Запуск и обновление существующего volume
 

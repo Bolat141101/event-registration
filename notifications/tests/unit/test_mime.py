@@ -121,3 +121,46 @@ def test_header_parser_errors_are_normalized(error: type[Exception]) -> None:
     ):
         load_prepared(command, data)
     assert isinstance(caught.value.__cause__, error)
+
+
+@pytest.mark.parametrize(
+    "address,expected",
+    [
+        ("user@faß.de", "user@xn--fa-hia.de"),
+        ("user@xn--fa-hia.de", "user@xn--fa-hia.de"),
+        (" USER@FAẞ.DE ", "user@xn--fa-hia.de"),
+        ("user@fass.de", "user@fass.de"),
+        ("Some.One+Tag@EXAMPLE.test", "some.one+tag@example.test"),
+    ],
+)
+def test_mailbox_idna2008_ascii_domain(address: str, expected: str) -> None:
+    assert mailbox(address) == expected
+
+
+def test_legacy_payload_is_not_rewritten_and_wrong_fass_mime_is_rejected() -> None:
+    command = message().model_copy(
+        update={"payload": message().payload.model_copy(update={"recipient": "user@faß.de"})}
+    )
+    before = command.model_dump(mode="json")
+    data = render(command, "events@example.test", "http://localhost:8080", datetime.now(UTC))
+    prepared = load_prepared(command, data)
+    assert prepared.recipient == "user@xn--fa-hia.de" and prepared.data == data
+    assert b"To: user@xn--fa-hia.de\r\n" in data
+    wrong = data.replace(b"user@xn--fa-hia.de", b"user@fass.de")
+    with pytest.raises(ValueError, match="identity"):
+        load_prepared(command, wrong)
+    assert command.model_dump(mode="json") == before
+
+
+def test_legacy_ascii_case_mime_preserves_headers_and_bytes() -> None:
+    command = message()
+    data = render(command, "events@example.test", "http://localhost:8080", datetime.now(UTC))
+    data = data.replace(b"From: events@example.test", b"From: Events@Example.test")
+    data = data.replace(b"To: user@example.test", b"To: USER@EXAMPLE.TEST")
+    data = data.replace(
+        f"<{command.message_id}@example.test>".encode(),
+        f"<{command.message_id}@Example.test>".encode(),
+    )
+    prepared = load_prepared(command, data)
+    assert prepared.data == data and prepared.recipient == "user@example.test"
+    assert prepared.sender == "events@example.test"
