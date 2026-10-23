@@ -423,7 +423,8 @@ async def test_openapi_exposes_new_routes(client: AsyncClient) -> None:
     assert "post" in paths["/api/events"]
     assert "patch" in paths["/api/events/{event_id}/schedule"]
     assert "/api/registration/resume" in paths
-    assert "/api/events/{event_id}/stream" not in paths
+    assert "get" in paths["/api/events/{event_id}/stream"]
+    assert "get" in paths["/api/organizer/access"]
 
 
 async def test_waiting_for_event_lock_does_not_block_other_requests(

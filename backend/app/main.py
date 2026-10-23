@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.api.errors import install_error_handlers
 from app.api.events import router as events_router
 from app.api.health import router as health_router
+from app.api.live import router as live_router
 from app.api.registrations import router as registrations_router
 from app.clock import Clock, utc_now
 from app.config import Settings
@@ -38,6 +39,7 @@ def create_app(settings: Settings | None = None, clock: Clock = utc_now) -> Fast
         openapi_url="/api/openapi.json",
     )
     app.include_router(health_router, prefix="/api")
+    app.include_router(live_router, prefix="/api")
     app.include_router(events_router, prefix="/api")
     app.include_router(registrations_router, prefix="/api")
     install_error_handlers(app)

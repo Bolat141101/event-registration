@@ -47,7 +47,7 @@ jobs:
           docker compose run --rm --no-deps test ruff format --check .
 
       - name: Mypy
-        run: docker compose run --rm --no-deps test mypy app tests/conftest.py tests/integration/test_relay_blocking.py
+        run: docker compose run --rm --no-deps test mypy app tests/conftest.py tests/integration/test_relay_blocking.py tests/integration/test_live.py
 
       - name: Core migrations and full Pytest suite as unprivileged core_app_test
         run: docker compose run --rm test

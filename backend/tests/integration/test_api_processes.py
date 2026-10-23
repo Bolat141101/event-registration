@@ -62,7 +62,7 @@ async def api_clients(business: Business) -> AsyncIterator[APIClients]:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
                     listener.bind(("127.0.0.1", 0))
                     address = f"http://127.0.0.1:{listener.getsockname()[1]}"
-                    process = context.Process(
+                    process: BaseProcess = context.Process(
                         target=serve_api,
                         args=(
                             listener,

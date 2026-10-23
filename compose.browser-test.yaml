@@ -1,0 +1,32 @@
+# Only for isolated browser tests. Never combine with the main project name.
+name: event-registration-relay-check-ui-local
+
+services:
+  db:
+    volumes: !reset []
+    tmpfs:
+      - /var/lib/postgresql/data
+  mailpit:
+    volumes: !reset []
+    tmpfs:
+      - /data
+  api:
+    image: event-registration-ui-check-core:local
+  worker:
+    image: event-registration-ui-check-core:local
+    environment:
+      WORKER_POLL_INTERVAL: '0.2'
+      RELAY_BACKOFF_CAP: '10'
+      RELAY_MAX_ATTEMPTS: '20'
+  migrate:
+    image: event-registration-ui-check-core:local
+  notifications:
+    image: event-registration-ui-check-notifications:local
+  notifications-sender:
+    image: event-registration-ui-check-notifications:local
+    environment:
+      SENDER_POLL_INTERVAL: '0.2'
+      SENDER_BACKOFF_CAP: '2'
+      SENDER_MAX_ATTEMPTS: '20'
+  notifications-migrate:
+    image: event-registration-ui-check-notifications:local
