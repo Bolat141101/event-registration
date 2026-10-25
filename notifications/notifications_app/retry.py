@@ -12,10 +12,20 @@ from notifications_app.contract import NotificationMessage
 from notifications_app.db import build_engine, build_session_factory
 from notifications_app.mime import load_prepared
 from notifications_app.models import JobStatus, NotificationJob
+from notifications_app.singleton import singleton
 
 
 async def retry_failed(
     sessions: async_sessionmaker[AsyncSession], identity: UUID, clock: Clock = utc_now
+) -> bool:
+    async with singleton(sessions) as acquired:
+        if not acquired:
+            return False
+        return await _retry_failed(sessions, identity, clock)
+
+
+async def _retry_failed(
+    sessions: async_sessionmaker[AsyncSession], identity: UUID, clock: Clock
 ) -> bool:
     async with sessions() as session, session.begin():
         job = await session.get(NotificationJob, identity, with_for_update=True)

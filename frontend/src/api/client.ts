@@ -8,6 +8,11 @@ export interface EventInfo {
   waitlisted: number;
   checked_in: number;
 }
+export interface EventPage {
+  items: EventInfo[];
+  next_offset: number | null;
+  server_time: string;
+}
 export interface Snapshot extends EventInfo {
   server_time: string;
 }
@@ -43,6 +48,7 @@ const messages: Record<string, string> = {
   participation_conflict:
     'Участие изменилось. Проверьте актуальные данные перед следующим действием.',
   schedule_version_conflict: 'Дата уже изменилась. Обновите данные и проверьте новое время.',
+  rate_limited: 'Слишком много запросов. Подождите немного и повторите попытку.',
   database_unavailable: 'Сервис временно недоступен. Попробуйте ещё раз.',
 };
 export async function request<T>(
@@ -100,7 +106,8 @@ export async function request<T>(
 }
 const json = (value: unknown) => JSON.stringify(value);
 export const api = {
-  events: (signal?: AbortSignal) => request<EventInfo[]>('/events', { signal }),
+  events: (signal?: AbortSignal, offset = 0) =>
+    request<EventPage>(`/events?limit=20&offset=${offset}`, { signal }),
   event: (id: string, signal?: AbortSignal) => request<EventInfo>(`/events/${id}`, { signal }),
   register: (id: string, email: string) =>
     request<{ message: string }>(`/events/${id}/registrations`, {
@@ -140,6 +147,7 @@ export function isSnapshot(value: unknown, id: string): value is Snapshot {
     typeof item.starts_at === 'string' &&
     Number.isFinite(Date.parse(item.starts_at)) &&
     typeof item.server_time === 'string' &&
+    Number.isFinite(Date.parse(item.server_time)) &&
     ['capacity', 'schedule_version', 'confirmed', 'waitlisted', 'checked_in'].every(
       (name) =>
         typeof item[name] === 'number' &&

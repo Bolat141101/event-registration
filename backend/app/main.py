@@ -12,6 +12,7 @@ from app.clock import Clock, utc_now
 from app.config import Settings
 from app.db.health import expected_schema_heads
 from app.db.session import build_engine, build_session_factory
+from app.live import LiveHub
 
 
 def create_app(settings: Settings | None = None, clock: Clock = utc_now) -> FastAPI:
@@ -25,9 +26,11 @@ def create_app(settings: Settings | None = None, clock: Clock = utc_now) -> Fast
         app.state.schema_heads = expected_schema_heads()
         app.state.settings = settings
         app.state.clock = clock
+        app.state.live_hub = LiveHub(app.state.session_factory, settings.sse_max_connections)
         try:
             yield
         finally:
+            await app.state.live_hub.close()
             await engine.dispose()
 
     app = FastAPI(

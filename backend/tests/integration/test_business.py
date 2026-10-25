@@ -395,17 +395,17 @@ async def test_schedule_rolls_back_date_version_and_outbox(business: Business) -
     person = await business.join(event.id, "user@example.test")
     before = await business.event(event.id)
     original = [(m.id, m.payload, m.available_at) for m in (await business.messages(person))]
-    actual_enqueue = events.queue_reschedule
+    actual_enqueue = events.queue_reschedules
 
     async def fail_after_enqueue(
-        session: AsyncSession, entry: Registration, item: Event, old_time: datetime, now: datetime
+        session: AsyncSession, item: Event, old_time: datetime, now: datetime
     ) -> None:
-        await actual_enqueue(session, entry, item, old_time, now)
+        await actual_enqueue(session, item, old_time, now)
         await session.flush()
         raise RuntimeError("failure")
 
     with (
-        patch("app.services.events.queue_reschedule", side_effect=fail_after_enqueue),
+        patch("app.services.events.queue_reschedules", side_effect=fail_after_enqueue),
         pytest.raises(RuntimeError),
     ):
         await business.schedule(event.id, event.starts_at + timedelta(days=1), 1)
@@ -507,3 +507,60 @@ async def test_cancellation_rolls_back_registration_outbox_and_releases_lock(
     async with asyncio.timeout(5):
         person = await business.join(event.id, "replacement@example.test")
     assert (await business.private(person)).status == "confirmed"
+
+
+async def test_mass_reschedule_has_constant_statement_count_and_rolls_back_atomically(
+    business: Business,
+) -> None:
+    from sqlalchemy import event as sql_event
+    from sqlalchemy import text
+
+    event = await business.create(capacity=30)
+    for index in range(25):
+        await business.join(event.id, f"mass-{index}@example.test")
+    statements: list[str] = []
+
+    def record(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement.split()[0])
+
+    sql_event.listen(business.engine.sync_engine, "before_cursor_execute", record)
+    try:
+        await business.schedule(event.id, event.starts_at + timedelta(days=1), 1)
+    finally:
+        sql_event.remove(business.engine.sync_engine, "before_cursor_execute", record)
+    assert len(statements) <= 8  # Constant work: lock, update, three outbox statements, snapshot.
+    assert statements.count("INSERT") == 2
+    async with business.engine.connect() as connection:
+        before = (
+            await connection.execute(
+                text(
+                    "SELECT dedup_key,payload,status,available_at "
+                    "FROM email_outbox ORDER BY dedup_key"
+                )
+            )
+        ).all()
+
+    def abort_last_insert(_connection, _cursor, statement, _parameters, _context, _many):
+        if "INSERT INTO email_outbox" in statement and "'rescheduled'" in statement:
+            raise RuntimeError("simulated failure before commit")
+
+    sql_event.listen(business.engine.sync_engine, "before_cursor_execute", abort_last_insert)
+    try:
+        with pytest.raises(RuntimeError, match="simulated failure"):
+            await business.schedule(event.id, event.starts_at + timedelta(days=2), 2)
+    finally:
+        sql_event.remove(business.engine.sync_engine, "before_cursor_execute", abort_last_insert)
+    current = await business.event(event.id)
+    assert current.schedule_version == 2 and current.starts_at == event.starts_at + timedelta(
+        days=1
+    )
+    async with business.engine.connect() as connection:
+        after = (
+            await connection.execute(
+                text(
+                    "SELECT dedup_key,payload,status,available_at "
+                    "FROM email_outbox ORDER BY dedup_key"
+                )
+            )
+        ).all()
+    assert before == after

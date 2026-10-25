@@ -58,6 +58,7 @@ class OutboxStatus(StrEnum):
 class Event(Base):
     __tablename__ = "events"
     __table_args__ = (
+        Index("ix_events_start", "starts_at", "id"),
         CheckConstraint("capacity > 0", name="positive_capacity"),
         CheckConstraint("schedule_version > 0", name="positive_schedule_version"),
         CheckConstraint("length(btrim(description)) > 0", name="nonempty_description"),
@@ -128,6 +129,7 @@ class Registration(Base):
 class EmailOutbox(Base):
     __tablename__ = "email_outbox"
     __table_args__ = (
+        Index("ix_email_outbox_registration", "registration_id"),
         CheckConstraint(
             "kind IN ('ticket', 'waitlist', 'reminder', 'rescheduled')", name="valid_kind"
         ),

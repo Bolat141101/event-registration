@@ -11,6 +11,7 @@ from notifications_app.db import build_engine, build_session_factory
 from notifications_app.health import database_is_ready, expected_schema_heads
 from notifications_app.sender import Sender
 from notifications_app.smtp import send_email
+from notifications_app.worker_health import heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +31,14 @@ async def run() -> None:
         )
         while not stop.is_set():
             try:
-                if not await database_is_ready(engine, heads):
+                ready = await database_is_ready(engine, heads)
+                heartbeat(ready)
+                if not ready:
                     logger.error("Notifications database schema is not ready")
                 elif await sender.run_once():
                     continue
             except Exception as exc:
+                heartbeat(False)
                 # Exception strings may contain DSN, recipient, token or SMTP replies.
                 logger.warning("Sender iteration failed (%s)", type(exc).__name__)
             with suppress(TimeoutError):

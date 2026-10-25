@@ -1,12 +1,11 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import Clock, as_utc, utc_now
-from app.db.models import Event, Registration, RegistrationStatus
-from app.notifications.outbox import queue_reschedule
+from app.db.models import Event
+from app.notifications.reschedule import queue_reschedules
 from app.services.common import (
     EventView,
     event_view,
@@ -36,9 +35,9 @@ async def create_event(
         return await event_view(session, event.id)
 
 
-async def list_events(session: AsyncSession) -> list[EventView]:
+async def list_events(session: AsyncSession, limit: int = 21, offset: int = 0) -> list[EventView]:
     async with session.begin():
-        return await event_views(session)
+        return await event_views(session, limit=limit, offset=offset)
 
 
 async def get_event(session: AsyncSession, event_id: UUID) -> EventView:
@@ -67,15 +66,6 @@ async def reschedule_event(
         old_starts_at = event.starts_at
         event.starts_at = starts_at
         event.schedule_version += 1
-        entries = (
-            await session.scalars(
-                select(Registration).where(
-                    Registration.event_id == event_id,
-                    Registration.status != RegistrationStatus.CANCELLED,
-                )
-            )
-        ).all()
-        for entry in entries:
-            await queue_reschedule(session, entry, event, old_starts_at, now)
         await session.flush()
+        await queue_reschedules(session, event, old_starts_at, now)
         return await event_view(session, event_id)

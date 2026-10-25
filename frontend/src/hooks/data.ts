@@ -7,18 +7,55 @@ export function useEvents() {
   const [data, setData] = useState<EventInfo[] | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [revision, setRevision] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [serverNow, setServerNow] = useState<number | null>(null);
   useEffect(() => {
     const controller = new AbortController();
+    let anchor: { epoch: number; received: number } | null = null;
     setError(null);
+    setData(null);
+    setServerNow(null);
     void api
-      .events(controller.signal)
-      .then(setData)
+      .events(controller.signal, offset)
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        const epoch = Date.parse(page.server_time);
+        if (!Number.isFinite(epoch)) throw new Error('Не удалось уточнить время сервера.');
+        anchor = { epoch, received: performance.now() };
+        setServerNow(epoch);
+        setData(page.items);
+        setNextOffset(page.next_offset);
+      })
       .catch((reason: Error) => {
         if (!controller.signal.aborted) setError(reason);
       });
-    return () => controller.abort();
-  }, [revision]);
-  return { data, error, retry: () => setRevision((value) => value + 1) };
+    const timer = window.setInterval(() => {
+      if (anchor) setServerNow(anchor.epoch + performance.now() - anchor.received);
+    }, 250);
+    const offline = () => {
+      anchor = null;
+      setServerNow(null);
+    };
+    const online = () => setRevision((value) => value + 1);
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', online);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+      window.removeEventListener('offline', offline);
+      window.removeEventListener('online', online);
+    };
+  }, [revision, offset]);
+  return {
+    data,
+    error,
+    offset,
+    nextOffset,
+    serverNow,
+    setOffset,
+    retry: () => setRevision((value) => value + 1),
+  };
 }
 
 export function useLiveEvent(id: string | undefined) {
@@ -26,35 +63,63 @@ export function useLiveEvent(id: string | undefined) {
   const [error, setError] = useState<Error | null>(null);
   const [live, setLive] = useState<'connecting' | 'connected' | 'offline'>('connecting');
   const [tick, setTick] = useState(0);
+  const [serverNow, setServerNow] = useState<number | null>(null);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     setData((previous) => (previous?.id === id ? previous : null));
     setError(null);
     setLive('connecting');
+    setServerNow(null);
     if (!id) return;
     const controller = new AbortController();
     let source: EventSource | null = null;
-    let lastMessage = Date.now();
+    let privateSignature = '';
+    let privateReadAt = 0;
+    let lastMessage = performance.now();
+    let anchor: { epoch: number; received: number } | null = null;
+    const loseTime = () => {
+      anchor = null;
+      setServerNow(null);
+    };
     const connect = () => {
       if (controller.signal.aborted || !navigator.onLine) return;
       source?.close();
+      privateSignature = '';
       source = new EventSource(`/api/events/${id}/stream`); // Public data: no credentials in URL.
       source.addEventListener('stats', (message: MessageEvent<string>) => {
         if (controller.signal.aborted) return;
         try {
           const snapshot: unknown = JSON.parse(message.data);
           if (!isSnapshot(snapshot, id)) throw new Error('Invalid snapshot');
-          lastMessage = Date.now();
+          lastMessage = performance.now();
+          anchor = { epoch: Date.parse(snapshot.server_time), received: lastMessage };
+          setServerNow(anchor.epoch);
           setData(snapshot as Snapshot);
+          setError(null);
           setLive('connected');
-          setTick((value) => value + 1);
+          const signature = JSON.stringify([
+            snapshot.starts_at,
+            snapshot.schedule_version,
+            snapshot.confirmed,
+            snapshot.waitlisted,
+            snapshot.checked_in,
+          ]);
+          if (signature !== privateSignature || lastMessage - privateReadAt >= 10000) {
+            privateSignature = signature;
+            privateReadAt = lastMessage;
+            setTick((value) => value + 1);
+          }
         } catch {
           setLive('offline');
+          loseTime();
           source?.close();
         }
       });
       source.onerror = () => {
-        if (!controller.signal.aborted) setLive('offline');
+        if (!controller.signal.aborted) {
+          setLive('offline');
+          loseTime();
+        }
       };
     };
     void api
@@ -69,24 +134,29 @@ export function useLiveEvent(id: string | undefined) {
         if (!controller.signal.aborted) {
           setError(reason);
           setLive('offline');
+          if (reason instanceof ApiError && (reason.status === 0 || reason.status === 503))
+            connect();
         }
       });
     const watchdog = window.setInterval(() => {
-      if (source && navigator.onLine && Date.now() - lastMessage > 8000) {
+      if (anchor) setServerNow(anchor.epoch + performance.now() - anchor.received);
+      if (source && navigator.onLine && performance.now() - lastMessage > 8000) {
         setLive('offline');
-        lastMessage = Date.now();
+        loseTime();
+        lastMessage = performance.now();
         connect();
       }
-    }, 1000);
+    }, 250);
     const focus = () => {
       if (source) {
-        lastMessage = Date.now();
+        lastMessage = performance.now();
         connect();
       } else if (!controller.signal.aborted) {
         setRevision((value) => value + 1);
       }
     };
     const offline = () => {
+      loseTime();
       source?.close();
       setLive('offline');
     };
@@ -107,6 +177,7 @@ export function useLiveEvent(id: string | undefined) {
     error,
     live,
     tick,
+    serverNow,
     refresh: () => setRevision((value) => value + 1),
     replace: setData,
   };

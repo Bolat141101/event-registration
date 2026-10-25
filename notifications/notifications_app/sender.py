@@ -14,6 +14,7 @@ from notifications_app.config import Settings
 from notifications_app.contract import NotificationMessage
 from notifications_app.mime import PreparedEmail, load_prepared, render
 from notifications_app.models import JobStatus, NotificationJob
+from notifications_app.singleton import singleton
 
 type Delivery = Callable[[PreparedEmail], Awaitable[None]]
 
@@ -83,6 +84,12 @@ class Sender:
                     job.status = JobStatus.FAILED
 
     async def run_once(self) -> bool:
+        async with singleton(self.sessions) as acquired:
+            if not acquired:
+                return False
+            return await self._run_once()
+
+    async def _run_once(self) -> bool:
         async with self.sessions() as session:
             identity = await session.scalar(
                 select(NotificationJob.id)

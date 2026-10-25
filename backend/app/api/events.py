@@ -1,6 +1,9 @@
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies import DatabaseSession, RequestClock, organizer_access
 from app.api.schemas import CheckIn, CreateEvent, Register, RegistrationAccepted, RescheduleEvent
@@ -11,9 +14,22 @@ router = APIRouter(prefix="/events", tags=["events"])
 organizer = [Depends(organizer_access)]
 
 
+@dataclass(frozen=True)
+class EventPage:
+    items: list[EventView]
+    next_offset: int | None
+    server_time: datetime
+
+
 @router.get("")
-async def list_events(session: DatabaseSession) -> list[EventView]:
-    return await events.list_events(session)
+async def list_events(
+    session: DatabaseSession,
+    clock: RequestClock,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0, le=1000000)] = 0,
+) -> EventPage:
+    items = await events.list_events(session, limit + 1, offset)
+    return EventPage(items[:limit], offset + limit if len(items) > limit else None, clock())
 
 
 @router.get("/{event_id}")

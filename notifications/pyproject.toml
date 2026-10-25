@@ -9,6 +9,7 @@ description = "Independent notification infrastructure"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115,<1",
+    "anyio>=4,<5",
     "sqlalchemy[asyncio]>=2.0,<2.1",
     "alembic>=1.16,<2",
     "asyncpg>=0.30,<1",

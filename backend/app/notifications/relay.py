@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.notifications.contract import NotificationAccepted, NotificationMessage
 from app.notifications.outbox import context
+from app.notifications.singleton import singleton
 
 
 class Relay:
@@ -194,6 +195,12 @@ class Relay:
                     message.status = OutboxStatus.FAILED
 
     async def run_once(self) -> bool:
+        async with singleton(self.sessions) as acquired:
+            if not acquired:
+                return False
+            return await self._run_once()
+
+    async def _run_once(self) -> bool:
         for event_id, identity in await self._candidates():
             self._event_cursor = event_id
             try:

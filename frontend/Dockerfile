@@ -9,6 +9,8 @@ COPY src ./src
 RUN npm run format:check && npm run test && npm run build
 
 FROM nginx:stable-alpine@sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+ENV REGISTER_RATE=30r/s REGISTER_BURST=1000 SSE_LIMIT=2000
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+COPY api-proxy.inc /etc/nginx/api-proxy.inc
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

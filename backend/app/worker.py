@@ -11,6 +11,7 @@ from app.config import Settings
 from app.db.health import database_is_ready, expected_schema_heads
 from app.db.session import build_engine, build_session_factory
 from app.notifications.relay import Relay
+from app.worker_health import heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +35,14 @@ async def run() -> None:
             relay = Relay(build_session_factory(engine), client, settings)
             while not stop.is_set():
                 try:
-                    if not await database_is_ready(engine, heads):
+                    ready = await database_is_ready(engine, heads)
+                    heartbeat(ready)
+                    if not ready:
                         logger.error("Database schema is not ready")
                     elif await relay.run_once():
                         continue
                 except Exception as exc:
+                    heartbeat(False)
                     # DB failures may escape asyncpg without a SQLAlchemy wrapper.
                     # Retry the durable state on a later poll; never log credentials.
                     logger.warning("Relay iteration failed (%s)", type(exc).__name__)

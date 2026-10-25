@@ -300,3 +300,58 @@ async def test_restart_after_prepare_before_http_recovers_same_command(
     row = await stored(business, message.id)
     assert row.attempts == 2 and row.status == OutboxStatus.FORWARDED
     assert row.payload == prepared.model_dump(mode="json")
+
+
+async def test_two_relays_cannot_forward_same_prepared_job_while_first_http_is_pending(
+    business: Business, relay_settings: Settings
+) -> None:
+    await first_ticket(business)
+    entered, release = asyncio.Event(), asyncio.Event()
+    received: list[bytes] = []
+
+    async def receive(request: httpx.Request) -> httpx.Response:
+        received.append(request.content)
+        entered.set()
+        await release.wait()
+        return accepted(request)
+
+    sessions = async_sessionmaker(business.engine, expire_on_commit=False)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(receive)) as client:
+        first = asyncio.create_task(
+            Relay(sessions, client, relay_settings, business.clock).run_once()
+        )
+        await asyncio.wait_for(entered.wait(), 3)
+        business.clock.now += timedelta(seconds=10)
+        try:
+            assert not await Relay(sessions, client, relay_settings, business.clock).run_once()
+        finally:
+            release.set()
+            assert await first
+    assert len(received) == 1
+
+
+async def test_operator_retry_and_queue_diagnostics_preserve_frozen_payload(
+    business: Business, relay_settings: Settings
+) -> None:
+    from app.notifications.retry import retry_failed
+    from app.operations import summary
+
+    message = await first_ticket(business)
+    sessions = async_sessionmaker(business.engine, expire_on_commit=False)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(accepted)) as client:
+        relay = Relay(sessions, client, relay_settings, business.clock)
+        assert await relay.prepare(message.id)
+    async with sessions() as session, session.begin():
+        item = await session.get(EmailOutbox, message.id)
+        assert item
+        frozen, boundary = item.payload, item.prepared_at
+        item.status = OutboxStatus.FAILED
+    report = await summary()
+    failed_sample = report["failed_ids_sample"]
+    assert isinstance(failed_sample, list)
+    assert str(message.id) in failed_sample
+    assert "relay@example.test" not in str(report)
+    assert await retry_failed(sessions, message.id, business.clock)
+    assert not await retry_failed(sessions, message.id, business.clock)
+    item = await stored(business, message.id)
+    assert item.payload == frozen and item.prepared_at == boundary and item.attempts == 0

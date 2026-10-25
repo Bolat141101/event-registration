@@ -37,17 +37,22 @@ def serve_api(listener: socket.socket, database_url: str, now: datetime) -> None
 
 
 async def wait_ready(client: AsyncClient, process: BaseProcess) -> None:
-    async with asyncio.timeout(15):
-        while True:
-            assert process.is_alive(), f"API process exited: {process.exitcode}"
-            try:
-                response = await client.get("/api/health")
-                if response.status_code == 200:
-                    assert response.json() == {"status": "ok", "database": "ready"}
-                    return
-            except TransportError:
-                pass
-            await asyncio.sleep(0.02)
+    last_status: int | None = None
+    try:
+        async with asyncio.timeout(15):
+            while True:
+                assert process.is_alive(), f"API process exited: {process.exitcode}"
+                try:
+                    response = await client.get("/api/health")
+                    last_status = response.status_code
+                    if response.status_code == 200:
+                        assert response.json() == {"status": "ok", "database": "ready"}
+                        return
+                except TransportError:
+                    pass
+                await asyncio.sleep(0.02)
+    except TimeoutError:
+        raise AssertionError(f"API readiness timeout; last HTTP status={last_status}") from None
 
 
 @pytest.fixture

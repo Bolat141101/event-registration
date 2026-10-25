@@ -89,6 +89,7 @@ it('accepts only a complete snapshot for the subscribed event', () => {
   expect(isSnapshot(data, 'other')).toBe(false);
   expect(isSnapshot({ ...data, checked_in: -1 }, 'id')).toBe(false);
   expect(isSnapshot({ ...data, starts_at: 'bad' }, 'id')).toBe(false);
+  expect(isSnapshot({ ...data, server_time: 'bad' }, 'id')).toBe(false);
 });
 
 it('does not expose malformed successful response contents as a syntax error', async () => {
@@ -97,4 +98,19 @@ it('does not expose malformed successful response contents as a syntax error', a
     vi.fn().mockResolvedValue(new Response('fake-private-secret', { status: 200 }))
   );
   await expect(api.events()).rejects.toMatchObject({ code: 'invalid_response' });
+});
+
+it('requests bounded event pages and preserves the next offset', async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    new Response('{"items":[],"next_offset":60,"server_time":"2030-01-01T00:00:00Z"}', {
+      status: 200,
+    })
+  );
+  vi.stubGlobal('fetch', fetch);
+  await expect(api.events(undefined, 40)).resolves.toEqual({
+    items: [],
+    next_offset: 60,
+    server_time: '2030-01-01T00:00:00Z',
+  });
+  expect(fetch.mock.calls[0][0]).toBe('/api/events?limit=20&offset=40');
 });

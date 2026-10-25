@@ -534,3 +534,119 @@ async def test_legacy_unicode_payload_is_accepted_without_rewrite_and_smtp_uses_
     assert row.status == JobStatus.SENT and row.payload == legacy.model_dump(mode="json")
     if has_mime:
         assert row.mime == frozen
+
+
+async def test_two_senders_cannot_overlap_after_retry_becomes_due(
+    integration_engine: AsyncEngine, command: NotificationMessage, sender_settings: Settings
+) -> None:
+    clock = Clock()
+    sessions = async_sessionmaker(integration_engine, expire_on_commit=False)
+    entered, release = asyncio.Event(), asyncio.Event()
+    delivered: list[bytes] = []
+
+    async def deliver(email: PreparedEmail) -> None:
+        delivered.append(email.data)
+        entered.set()
+        await release.wait()
+
+    settings = sender_settings.model_copy(update={"sender_timeout": 5.0})
+    first = asyncio.create_task(Sender(sessions, settings, deliver, clock).run_once())
+    await asyncio.wait_for(entered.wait(), 3)
+    clock.now += timedelta(seconds=10)  # First SMTP still running, durable retry already due.
+    try:
+        assert not await Sender(sessions, settings, deliver, clock).run_once()
+        # A DIFFERENT interpreter also observes PostgreSQL ownership, not a Python mutex.
+        import os
+        import sys
+
+        code = """
+import asyncio, os
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from notifications_app.singleton import singleton
+async def main():
+    engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
+    async with singleton(async_sessionmaker(engine)) as acquired:
+        print(int(acquired))
+    await engine.dispose()
+asyncio.run(main())
+"""
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            code,
+            stdout=asyncio.subprocess.PIPE,
+            env=os.environ.copy(),
+        )
+        stdout, _ = await asyncio.wait_for(process.communicate(), 5)
+        assert process.returncode == 0 and stdout.strip() == b"0"
+    finally:
+        release.set()
+        assert await first
+    assert len(delivered) == 1
+    assert (await stored(integration_engine, command.message_id)).status == JobStatus.SENT
+    assert not await Sender(sessions, settings, deliver, clock).run_once()
+
+
+async def test_cancelled_sender_releases_mutex_and_reuses_frozen_mime(
+    integration_engine: AsyncEngine, command: NotificationMessage, sender_settings: Settings
+) -> None:
+    clock = Clock()
+    sessions = async_sessionmaker(integration_engine, expire_on_commit=False)
+    attempts: list[bytes] = []
+
+    async def interrupted(email: PreparedEmail) -> None:
+        attempts.append(email.data)
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await Sender(sessions, sender_settings, interrupted, clock).run_once()
+    clock.now += timedelta(seconds=10)
+
+    async def recovered(email: PreparedEmail) -> None:
+        attempts.append(email.data)
+
+    assert await Sender(sessions, sender_settings, recovered, clock).run_once()
+    assert len(attempts) == 2 and attempts[0] == attempts[1]
+    assert (await stored(integration_engine, command.message_id)).status == JobStatus.SENT
+
+
+async def test_losing_postgresql_mutex_connection_cancels_inflight_sender(
+    integration_engine: AsyncEngine, command: NotificationMessage, sender_settings: Settings
+) -> None:
+    clock = Clock()
+    sessions = async_sessionmaker(integration_engine, expire_on_commit=False)
+    entered = asyncio.Event()
+    attempts: list[bytes] = []
+
+    async def interrupted(email: PreparedEmail) -> None:
+        attempts.append(email.data)
+        entered.set()
+        await asyncio.Event().wait()
+
+    settings = sender_settings.model_copy(update={"sender_timeout": 5.0})
+    task = asyncio.create_task(Sender(sessions, settings, interrupted, clock).run_once())
+    try:
+        await asyncio.wait_for(entered.wait(), 3)
+        async with integration_engine.connect() as connection:
+            # Ordinary PostgreSQL roles may terminate their own other connections.
+            assert await connection.scalar(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_locks "
+                    "WHERE locktype='advisory' AND objid=794632801 AND granted "
+                    "AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) "
+                    "AND pid<>pg_backend_pid()"
+                )
+            )
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 3)
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    clock.now += timedelta(seconds=10)
+
+    async def recovered(email: PreparedEmail) -> None:
+        attempts.append(email.data)
+
+    assert await Sender(sessions, settings, recovered, clock).run_once()
+    assert len(attempts) == 2 and attempts[0] == attempts[1]

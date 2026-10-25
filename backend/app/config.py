@@ -7,6 +7,7 @@ class Settings(BaseSettings):
 
     database_url: PostgresDsn = Field(repr=False)
     organizer_token: SecretStr = Field(min_length=32, repr=False)
+    sse_max_connections: int = Field(default=2000, ge=1, le=10000)
     worker_poll_interval: float = Field(default=5.0, gt=0, le=60)
     notifications_url: AnyHttpUrl = Field(
         default=AnyHttpUrl("http://notifications:8000"), repr=False

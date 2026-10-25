@@ -1,7 +1,7 @@
 import asyncio
 import os
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -58,7 +58,7 @@ async def test_create_list_detail_and_aggregate_snapshots(
     people = [(await business.join(event_id, f"person{i}@example.test")) for i in range(3)]
     details = (await client.get(f"/api/events/{event_id}")).json()
     assert (details["confirmed"], details["waitlisted"], details["checked_in"]) == (2, 1, 0)
-    assert details in (await client.get("/api/events")).json()
+    assert details in (await client.get("/api/events")).json()["items"]
     assert ORGANIZER not in str(details)
     assert all(person.token not in str(details) for person in people)
     assert "email" not in details and "ticket_code" not in details
@@ -476,3 +476,27 @@ async def test_async_driver_connection_errors_return_503(
     assert response.headers["Retry-After"] == "1"
     assert response.json()["code"] == "database_unavailable"
     assert str(error) not in response.text + caplog.text
+
+
+async def test_event_pages_are_bounded_and_have_no_duplicates(
+    client: AsyncClient, business: Business
+) -> None:
+    ids = {str((await business.create()).id) for _ in range(23)}
+    seen: set[str] = set()
+    offset = 0
+    while True:
+        response = await client.get(f"/api/events?limit=7&offset={offset}")
+        assert response.status_code == 200
+        page = response.json()
+        assert datetime.fromisoformat(page["server_time"]) == business.clock()
+        assert len(page["items"]) <= 7
+        current = {item["id"] for item in page["items"]}
+        assert not current & seen
+        seen |= current
+        if page["next_offset"] is None:
+            break
+        assert page["next_offset"] == offset + 7
+        offset = page["next_offset"]
+    assert ids <= seen
+    assert (await client.get("/api/events?limit=101")).status_code == 422
+    assert (await client.get("/api/events?offset=-1")).status_code == 422

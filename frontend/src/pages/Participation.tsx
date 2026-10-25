@@ -34,7 +34,8 @@ export function ParticipationPage({ token }: { token: string }) {
         />
       </main>
     );
-  const started = event.data ? Date.parse(event.data.starts_at) <= Date.now() : true;
+  const timeReady = event.serverNow !== null && event.data !== null;
+  const started = timeReady && Date.parse(event.data!.starts_at) <= event.serverNow!;
   const checked = data.checked_in_at !== null;
   const status =
     data.status === 'confirmed'
@@ -109,11 +110,14 @@ export function ParticipationPage({ token }: { token: string }) {
           участие подтвердится, иначе вы попадёте в конец листа ожидания.
         </p>
       )}
+      {!timeReady && (
+        <Notice>Уточняем время сервера. Для изменения участия восстановите связь.</Notice>
+      )}
       <div className="participation-actions">
         {!started && !checked && (
           <button
             className={data.status === 'cancelled' ? 'primary' : 'secondary'}
-            disabled={participant.busy}
+            disabled={participant.busy || !timeReady}
             onClick={() => {
               void participant.change(data.status === 'cancelled' ? 'resume' : 'cancel');
             }}

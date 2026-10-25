@@ -1,3 +1,4 @@
+import { Pagination } from '../components/Pagination';
 import { useEffect, useRef, useState } from 'react';
 import type { EventInfo } from '../api/client';
 import {
@@ -163,6 +164,7 @@ export function OrganizerHome({ organizerKey }: { organizerKey: string }) {
               ))}
             </div>
           )}
+          <Pagination list={list} />
         </section>
         <CreateForm organizerKey={organizerKey} />
       </div>
@@ -174,11 +176,13 @@ function ScheduleForm({
   organizerKey,
   saved,
   refresh,
+  serverNow,
 }: {
   event: EventInfo;
   organizerKey: string;
   saved: (event: EventInfo) => void;
   refresh: () => void;
+  serverNow: number | null;
 }) {
   const [value, setValue] = useState(dateInput(event.starts_at));
   const [notice, setNotice] = useState('');
@@ -186,7 +190,7 @@ function ScheduleForm({
   useEffect(() => {
     setValue(dateInput(event.starts_at));
   }, [event.starts_at]);
-  const started = Date.parse(event.starts_at) <= Date.now();
+  const started = serverNow !== null && Date.parse(event.starts_at) <= serverNow;
   return (
     <form
       className="schedule-form"
@@ -202,6 +206,9 @@ function ScheduleForm({
       }}
     >
       <h2>Дата мероприятия</h2>
+      {serverNow === null && (
+        <Notice>Уточняем время сервера. Восстановите связь для изменения даты.</Notice>
+      )}
       <p className="muted">При переносе участникам будет отправлено письмо.</p>
       <label htmlFor="new-date">Новая дата и время · Алматы (UTC+5)</label>
       <div className="inline-form">
@@ -212,9 +219,9 @@ function ScheduleForm({
           required
           value={value}
           onChange={(change) => setValue(change.target.value)}
-          disabled={action.busy || started}
+          disabled={action.busy || serverNow === null || started}
         />
-        <button className="secondary" disabled={action.busy || started}>
+        <button className="secondary" disabled={action.busy || serverNow === null || started}>
           {action.busy ? 'Сохраняем…' : 'Сохранить дату'}
         </button>
       </div>
@@ -224,16 +231,27 @@ function ScheduleForm({
     </form>
   );
 }
-function CheckinForm({ event, organizerKey }: { event: EventInfo; organizerKey: string }) {
+function CheckinForm({
+  event,
+  organizerKey,
+  serverNow,
+}: {
+  event: EventInfo;
+  organizerKey: string;
+  serverNow: number | null;
+}) {
   const [code, setCode] = useState('');
   const [result, setResult] = useState('');
   const input = useRef<HTMLInputElement>(null);
   const action = useCheckin(event.id, organizerKey);
-  const started = Date.parse(event.starts_at) <= Date.now();
+  const started = serverNow !== null && Date.parse(event.starts_at) <= serverNow;
   return (
     <section className="checkin-panel">
       <p className="eyebrow">Вход на мероприятие</p>
       <h2>Проверить билет</h2>
+      {serverNow === null && (
+        <Notice>Уточняем время сервера. Восстановите связь для чекина.</Notice>
+      )}
       <p>Введите код с билета участника.</p>
       <form
         onSubmit={(submit) => {
@@ -323,7 +341,7 @@ export function OrganizerEvent({
       <Stats event={event} />
       <LiveState status={live.live} />
       {checkin ? (
-        <CheckinForm event={event} organizerKey={organizerKey} />
+        <CheckinForm event={event} organizerKey={organizerKey} serverNow={live.serverNow} />
       ) : (
         <div className="work-body">
           <ScheduleForm
@@ -331,6 +349,7 @@ export function OrganizerEvent({
             organizerKey={organizerKey}
             saved={live.replace}
             refresh={live.refresh}
+            serverNow={live.serverNow}
           />
           <aside className="public-link">
             <h2>Страница для участников</h2>

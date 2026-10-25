@@ -26,7 +26,7 @@
 
 `db-bootstrap` работает с существующим volume: создаёт отсутствующую вторую БД/обычные роли, изолирует доступ и адресно передаёт владельцев таблиц без изменения строк. POSTGRES_USER остаётся техническим администратором, не пользователем API. Подробные настройки, обновление и проверки — [docs/NOTIFICATIONS_INFRASTRUCTURE.md](docs/NOTIFICATIONS_INFRASTRUCTURE.md).
 
-Core больше не содержит SMTP_HOST/SMTP_PORT/SMTP_FROM: SMTP-настройки принадлежат только Notifications sender. Миграции Core: 0001 initial → 0002 simplify → 0003 forwarded → **0004 canonical_email**; Notifications — **0001_notification_jobs**. Старые revisions не редактируются; [preflight/IDNA/ограничения downgrade](docs/EMAIL_CANONICALIZATION.md).
+Core больше не содержит SMTP_HOST/SMTP_PORT/SMTP_FROM: SMTP-настройки принадлежат только Notifications sender. Миграции Core: 0001 initial → 0002 simplify → 0003 forwarded → 0004 canonical_email → **0005 scale_indexes**; Notifications — **0001_notification_jobs**. Старые revisions не редактируются; [preflight/IDNA/ограничения downgrade](docs/EMAIL_CANONICALIZATION.md).
 
 ## API текущего этапа
 
@@ -38,7 +38,8 @@ Core больше не содержит SMTP_HOST/SMTP_PORT/SMTP_FROM: SMTP-на
 | GET /api/organizer/access | Проверка действующего Bearer-ключа организатора без изменения данных |
 | GET /api/health | Публичная готовность БД/схемы |
 | GET /api/openapi.json | Публичная спецификация, включая тела запросов |
-| GET /api/events; GET /api/events/{id} | Публичные описание/дата/лимит/версия и три счётчика; без email и билетов |
+| GET /api/events?limit=20&offset=0 | Публичная страница `{items,next_offset,server_time}`, limit1..100; агрегаты только выбранных событий |
+| GET /api/events/{id} | Публичные описание/дата/лимит/версия и три счётчика; без email и билетов |
 | POST /api/events | Организатор: description, timezone-aware starts_at, положительная capacity; 201 |
 | PATCH /api/events/{id}/schedule | Организатор: starts_at, expected_schedule_version |
 | POST /api/events/{id}/registrations | Публичный email; одинаковый нейтральный 202 для создания/повтора, без секретов |
@@ -158,7 +159,7 @@ Workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) запускает
 2. Ruff (включая форматирование), Mypy и весь Pytest без исключения интеграционных тестов.
 3. Независимые Ruff/format/Mypy/Pytest Notifications, изоляцию ролей и миграции обоих проектов на настоящем PostgreSQL: upgrade, тест downgrade/upgrade и `alembic check`. Все Core-тесты выполняются под `core_app_test`, Notifications — под `notifications_app_test`.
 4. Отдельные Ruff/format/Mypy и интеграционный тест повторного bootstrap с данными в обеих тестовых БД, контролем владельцев/прав и запрета доступа между сервисами.
-5. Сборку frontend: npm ci, Prettier check, Vitest, TypeScript typecheck и Vite. Playwright E2E запускаются отдельной командой в локальном изолированном окружении; текущий GitHub workflow их пока не запускает.
+5. Сборку frontend: npm ci, Prettier check, Vitest, TypeScript typecheck и Vite. Playwright E2E запускаются отдельной командой в локальном изолированном окружении; GitHub workflow теперь включает их запуск (изменение 2026-10-24; удалённый запуск ещё не выполнен).
 6. Запуск приложения с новыми БД/volumes, проверки обоих health и независимости Core при остановленном Notifications.
 7. Реальный SMTP smoke: недоступность Mailpit, SIGKILL sender, неизменный MIME после рестарта, потеря SMTP DATA-ответа после accept и локальное подавление дубликата.
 8. Реальный HTTP relay smoke: недоступность получателя, SIGKILL relay, восстановление, конкурентные повторы, 409/401 и разрыв TCP после commit с перезапуском Notifications/relay.
@@ -219,7 +220,29 @@ scripts/browser-test.sh stop
 
 ### Результаты frontend-этапа — 2026-10-23
 
-В отдельном `event-registration-relay-check-ui-20261023` прошли **189 Core + 124 Notifications + 21 infrastructure Pytest-тест (334)**, Ruff/format/Mypy, миграционные round-trip/check, frontend Prettier/**17 Vitest**/TypeScript/Vite и **4 Playwright E2E в настоящем Chrome**. Два независимых клиента проверяют последнее место/очередь/отказ/продвижение/восстановление/письма Mailpit/билет/два конкурентных чекина/live; также проверены повтор email, перенос, неверная ссылка, HTTP409, сеть и переподключение. Просмотрены узкие/широкие скриншоты. Реальное отключение SSE выявило ошибку cleanup asyncpg; добавлены ограниченный cancellation shield и PostgreSQL-регрессия. После исправления повторные E2E и инспекция runtime логов прошли. Удалённый GitHub Actions и дополнительные браузеры не запускались; Playwright пока запускается локально. Полные команды и промежуточные неудачи сохранены в DEVELOPMENT_LOG.
+В отдельном `event-registration-relay-check-ui-20261023` прошли **189 Core + 124 Notifications + 21 infrastructure Pytest-тест (334)**, Ruff/format/Mypy, миграционные round-trip/check, frontend Prettier/**17 Vitest**/TypeScript/Vite и **4 Playwright E2E в настоящем Chrome**. Два независимых клиента проверяют последнее место/очередь/отказ/продвижение/восстановление/письма Mailpit/билет/два конкурентных чекина/live; также проверены повтор email, перенос, неверная ссылка, HTTP409, сеть и переподключение. Просмотрены узкие/широкие скриншоты. Реальное отключение SSE выявило ошибку cleanup asyncpg; добавлены ограниченный cancellation shield и PostgreSQL-регрессия. После исправления повторные E2E и инспекция runtime логов прошли. Удалённый GitHub Actions и дополнительные браузеры не запускались; На этом историческом этапе Playwright запускался локально; включён в CI 2026-10-24. Полные команды и промежуточные неудачи сохранены в DEVELOPMENT_LOG.
+
+## Надёжность и нагрузка — 2026-10-24
+
+Доступность регистрации/отмены/resume/переноса/чекина определяется server_time из настоящего SSE, с отсчётом performance.now. Часы устройства не используются. При первоначально неизвестном времени/потере связи действия отключены; свежий снимок восстанавливает их. Временный отказ начального REST GET не мешает восстановиться через SSE; 404 не скрывается.
+
+SSE разделяет один запрос в секунду на мероприятие на каждый API-процесс между всеми его подписчиками. Очередь клиента ограничена последним снимком; после последнего disconnect producer закрывается. UI не перечитывает private GET на каждый heartbeat: обновляет по изменению снимка/reconnect, а редкое изменение без изменения итоговых чисел — fallback до10s. Счётчики по-прежнему обновляются каждым снимком.
+
+Массовый перенос использует три SQL-операции outbox в той же event-locked транзакции; freeze/dedup/reminder/FIFO не меняются. Миграция0005 добавляет только индексы starts_at/id и outbox.registration_id, сохраняет24 поля и данные, downgrade удаляет только индексы. На большой production-таблице обычный CREATE INDEX требует планирования окна обслуживания; concurrent indexes потребуют отдельного эксплуатационного решения.
+
+Один активный sender/relay теперь обеспечен PostgreSQL session advisory mutex и проверкой соединения-владельца, а не только договорённостью оператора. HTTP/SMTP выполняются без открытой SQL-транзакции; сохраняются retry, immutable payload/MIME и риск SMTP-дубликата после accept. [Диагностика, безопасный retry, ограничения и подготовка production](docs/OPERATIONS.md).
+
+Nginx ограничивает регистрацию по настоящему remote_addr (30r/s, burst1000), SSE общим бюджетом2000 без маленького per-IP cap. Входные proxy headers перезаписываются. API имеет отдельный per-process SSE budget2000; API_WORKERS по умолчанию1. Значения — настройки демонстрационной установки, не результат доказанной production capacity. Публичный список ограничен страницами по20 записей, навигация есть в обоих разделах.
+
+CI включает Playwright с настоящими PostgreSQL/Mailpit в tmpfs, Node24/Chromium, ожиданием health и always-cleanup. Ранее реализованные HTTP/SMTP fault-scripts сохранены и запускаются перед E2E. PUBLIC_APP_URL сохраняется между шагами CI, чтобы после restart sender письма вели в фактический тестовый сайт. Команды/результаты текущего этапа — DEVELOPMENT_LOG; нагрузка — [методика и измерения](docs/LOAD_TESTING.md). Удалённый GitHub Actions не запускается без разрешённого push.
+
+Фактически проверено 24 октября: **196 Core + 128 Notifications + 21 infrastructure = 345 Pytest**, Ruff/format/Mypy, Alembic upgrade/downgrade/check обеих БД, сохранность заполненной БД при0005, **18 Vitest + TypeScript/Vite + 9 Chrome E2E**. Реальные HTTP/SMTP outage/crash/потеря подтверждения, heartbeat/queue checks и edge-ограничения также прошли. При1000 SSE и двух API-процессах ошибок нет; это не1000 регистраций/сек. Перенос/SSE стали дешевле по локальным замерам, ускорение регистрации не доказано, один прогон очереди заметно медленнее — цифры и ограничения сохранены в нагрузочном отчёте.
+
+### Исправления финального аудита — 24 октября
+
+Исправлены повторное подключение SSE после SQL-ошибки PostgreSQL, неполные критерии load probe, гонка ожидания E2E-пагинации и локальные часы в индикаторе мероприятия. Список возвращает `server_time`; список и страница используют только серверное время, при неизвестном времени индикатор нейтрален. Строгий probe теперь отклоняет частичный успех/неверные SSE/ошибки очереди, а старые замеры явно отмечены как исторические с более слабыми проверками.
+
+Повторные проверки: **199 Core + 128 Notifications + 32 infrastructure = 359 Pytest**, Ruff/format/Mypy/Alembic, **22 Vitest**, TypeScript/Vite, **11 Chrome E2E** и5 дополнительных повторов пагинации. Реальный строгий прогон200POST/1000SSE/2API прошёл;400 писем доставлены Mailpit. Это не гарантированная production capacity. Детали — [DEVELOPMENT_LOG](DEVELOPMENT_LOG.md), [LOAD_TESTING](docs/LOAD_TESTING.md).
 
 ## Что остаётся перед сдачей
 

@@ -260,10 +260,10 @@ test('network failure keeps a real error and retries; SSE reconnect receives cur
   page,
   request,
 }) => {
-  await page.route('**/api/events', (route) => route.abort());
+  await page.route('**/api/events?*', (route) => route.abort());
   await page.goto('/');
   await expect(page.getByRole('alert')).toContainText('Нет связи');
-  await page.unroute('**/api/events');
+  await page.unroute('**/api/events?*');
   await page.getByRole('button', { name: 'Попробовать ещё раз' }).click();
   await expect(page.locator('.event-list')).toBeVisible();
   const label = 'Восстановление связи · ' + randomUUID().slice(0, 8);
@@ -334,3 +334,208 @@ test('a stale participant action refreshes the real generation after HTTP409', a
     page.getByRole('heading', { name: 'Участие подтверждено', exact: true })
   ).toBeVisible();
 });
+
+for (const shift of [-365, 365]) {
+  test(`server time governs all actions despite device clock shift ${shift} days`, async ({
+    browser,
+    request,
+  }) => {
+    const label = 'Серверное время · ' + randomUUID().slice(0, 8);
+    const id = await create(request, label);
+    const context = await browser.newContext({ baseURL: base });
+    contexts.push(context);
+    const visitor = await context.newPage();
+    await visitor.clock.setFixedTime(new Date(Date.now() + shift * 86400000));
+    const address = 'clock+' + randomUUID().slice(0, 8) + '@example.test';
+    await register(visitor, id, address);
+    const token = await privateLink(request, label, address);
+    await openPrivate(visitor, token);
+    await visitor.getByRole('button', { name: 'Отказаться от участия' }).click();
+    await visitor.getByRole('button', { name: 'Восстановить участие' }).click();
+    await expect(visitor.getByRole('button', { name: 'Отказаться от участия' })).toBeEnabled();
+    const staff = await context.newPage();
+    await staff.clock.setFixedTime(new Date(Date.now() + shift * 86400000));
+    await login(staff, `/organizer/events/${id}`);
+    const later = new Date(Date.now() + 3 * 86400000);
+    await staff
+      .getByLabel('Новая дата и время · Алматы (UTC+5)')
+      .fill(dateInput(later.toISOString()));
+    await staff.getByRole('button', { name: 'Сохранить дату' }).click();
+    await expect(staff.getByText('Дата сохранена.', { exact: false })).toBeVisible();
+    await staff.getByRole('link', { name: 'Открыть чекин' }).click();
+    await expect(staff.getByRole('button', { name: 'Отметить участника' })).toBeDisabled();
+    await context.setOffline(true);
+    await expect(visitor.getByRole('button', { name: 'Отказаться от участия' })).toBeDisabled();
+    await expect(staff.getByRole('button', { name: 'Отметить участника' })).toBeDisabled();
+    const moved = await request.patch(base + `/api/events/${id}/schedule`, {
+      headers: auth,
+      data: { starts_at: new Date(Date.now() + 3000).toISOString(), expected_schedule_version: 2 },
+    });
+    expect(moved.status()).toBe(200);
+    // Change the device clock in the opposite direction while SSE is unavailable.
+    await visitor.clock.setFixedTime(new Date(Date.now() - shift * 86400000));
+    await context.setOffline(false);
+    await expect(staff.getByRole('button', { name: 'Отметить участника' })).toBeEnabled({
+      timeout: 15000,
+    });
+    await expect(
+      visitor.getByText('Мероприятие началось. Изменить участие уже нельзя.')
+    ).toBeVisible();
+    await visitor.goto(`/events/${id}`);
+    await expect(visitor.getByRole('heading', { name: 'Регистрация завершена' })).toBeVisible();
+    await staff.getByRole('link', { name: 'К управлению' }).click();
+    await expect(staff.getByRole('button', { name: 'Сохранить дату' })).toBeDisabled();
+  });
+}
+
+test('initial server time is unknown until a real SSE snapshot arrives', async ({
+  page,
+  request,
+}) => {
+  const id = await create(request, 'Ожидание времени · ' + randomUUID().slice(0, 8));
+  await page.route('**/stream', (route) => route.abort());
+  await page.goto(`/events/${id}`);
+  await expect(page.getByRole('button', { name: 'Отправить заявку' })).toBeDisabled();
+  await expect(page.getByText('Уточняем время сервера.', { exact: false })).toBeVisible();
+  await expect(page.locator('.availability')).toHaveText('Уточняем статус');
+  await page.unroute('**/stream');
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Отправить заявку' })).toBeEnabled();
+});
+
+test('event pagination works in public and organizer views through the real API', async ({
+  page,
+  request,
+}) => {
+  for (let index = 0; index < 23; index++)
+    await create(request, 'Страница · ' + randomUUID().slice(0, 8));
+
+  async function turn(direction: 'Далее' | 'Назад', offset: number, organizer = false) {
+    let intercepted!: () => void;
+    const entered = new Promise<void>((done) => {
+      intercepted = done;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    const pattern = `**/api/events?limit=20&offset=${offset}`;
+    await page.route(
+      pattern,
+      async (route) => {
+        intercepted();
+        await gate;
+        await route.continue();
+      },
+      { times: 1 }
+    );
+    const response = page.waitForResponse((res) => {
+      const url = new URL(res.url());
+      return url.pathname === '/api/events' && url.searchParams.get('offset') === String(offset);
+    });
+    try {
+      await page.getByRole('button', { name: direction, exact: true }).click();
+      await entered;
+      await expect(page.getByText('Загружаем…', { exact: true })).toBeVisible();
+    } finally {
+      release();
+    }
+    const acknowledged = await response;
+    expect(acknowledged.status()).toBe(200);
+    const body = (await acknowledged.json()) as { items: { id: string }[] };
+    const prefix = organizer ? '/organizer/events/' : '/events/';
+    const selector = organizer ? '.organizer-list h3 a' : '.event-row h2 a';
+    const expected = body.items.map((event) => prefix + event.id);
+    expect(expected.length).toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        page
+          .locator(selector)
+          .evaluateAll((links) => links.map((link) => link.getAttribute('href')))
+      )
+      .toEqual(expected);
+    await expect(page.getByText(`Страница ${offset / 20 + 1}`, { exact: true })).toBeVisible();
+    return expected;
+  }
+
+  await page.goto('/');
+  await expect(page.locator('.event-row')).toHaveCount(20);
+  const firstIds = await page
+    .locator('.event-row h2 a')
+    .evaluateAll((links) => links.map((link) => link.getAttribute('href')));
+  const secondIds = await turn('Далее', 20);
+  expect(secondIds.some((id) => firstIds.includes(id))).toBe(false);
+  expect(await turn('Назад', 0)).toEqual(firstIds);
+  await login(page);
+  await expect(page.locator('.organizer-list article')).toHaveCount(20);
+  await turn('Далее', 20, true);
+  await turn('Назад', 0, true);
+});
+
+test('real SSE recovers the event after an initial REST transport failure', async ({
+  page,
+  request,
+}) => {
+  const id = await create(request, 'Начальная связь · ' + randomUUID().slice(0, 8));
+  await page.route(`**/api/events/${id}`, (route) => route.abort());
+  await page.goto(`/events/${id}`);
+  await expect(page.getByRole('button', { name: 'Отправить заявку' })).toBeEnabled();
+  await page
+    .getByLabel('Email', { exact: true })
+    .fill('initial+' + randomUUID().slice(0, 8) + '@example.test');
+  await page.getByRole('button', { name: 'Отправить заявку' }).click();
+  await expect(page.getByText('Запрос принят.', { exact: false })).toBeVisible();
+});
+
+for (const direction of [-1, 1]) {
+  test(`availability uses server time with browser clock shifted ${direction} year`, async ({
+    page,
+    request,
+  }) => {
+    const id = await create(request, 'Индикатор · ' + randomUUID().slice(0, 8));
+    await page.clock.setFixedTime(new Date(Date.now() + direction * 365 * 86400000));
+    await page.goto(`/events/${id}`);
+    await expect(page.getByRole('button', { name: 'Отправить заявку' })).toBeEnabled();
+    await expect(page.locator('.availability')).toHaveText('Свободно 1 из 1');
+    await page.goto('/');
+    // Locate the new event on its actual page, independent of previous test data.
+    let offset = 0;
+    while (true) {
+      const listing = await request.get(base + `/api/events?limit=20&offset=${offset}`);
+      expect(listing.status()).toBe(200);
+      const body = (await listing.json()) as {
+        items: { id: string }[];
+        next_offset: number | null;
+      };
+      if (body.items.some((event) => event.id === id)) break;
+      expect(body.next_offset).not.toBeNull();
+      offset = body.next_offset!;
+      const response = page.waitForResponse(
+        (res) => new URL(res.url()).searchParams.get('offset') === String(offset)
+      );
+      await page.getByRole('button', { name: 'Далее', exact: true }).click();
+      await response;
+      await expect(page.getByText(`Страница ${offset / 20 + 1}`, { exact: true })).toBeVisible();
+    }
+    await expect(
+      page
+        .locator('.event-row')
+        .filter({ has: page.locator(`h2 a[href="/events/${id}"]`) })
+        .locator('.availability')
+    ).toHaveText('Свободно 1 из 1');
+    await page.goto(`/events/${id}`);
+    await expect(page.getByRole('button', { name: 'Отправить заявку' })).toBeEnabled();
+    const starts = new Date(Date.now() + 1500).toISOString();
+    const moved = await request.patch(base + `/api/events/${id}/schedule`, {
+      headers: auth,
+      data: { starts_at: starts, expected_schedule_version: 1 },
+    });
+    expect(moved.status()).toBe(200);
+    await expect(page.getByRole('heading', { name: 'Регистрация завершена' })).toBeVisible();
+    await expect(page.locator('.availability')).toHaveText('Уже началось');
+    await page.context().setOffline(true);
+    await expect(page.locator('.availability')).toHaveText('Уточняем статус');
+    await page.context().setOffline(false);
+    await expect(page.locator('.availability')).toHaveText('Уже началось');
+  });
+}

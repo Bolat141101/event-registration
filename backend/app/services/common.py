@@ -86,7 +86,9 @@ async def find_registration(session: AsyncSession, token: str) -> Registration:
     return entry
 
 
-async def event_views(session: AsyncSession, event_id: UUID | None = None) -> list[EventView]:
+async def event_views(
+    session: AsyncSession, event_id: UUID | None = None, *, limit: int = 21, offset: int = 0
+) -> list[EventView]:
     query = (
         select(
             Event.id,
@@ -106,6 +108,9 @@ async def event_views(session: AsyncSession, event_id: UUID | None = None) -> li
     )
     if event_id is not None:
         query = query.where(Event.id == event_id)
+    else:
+        page = select(Event.id).order_by(Event.starts_at, Event.id).offset(offset).limit(limit)
+        query = query.where(Event.id.in_(page))
     return [EventView(*row) for row in (await session.execute(query))]
 
 

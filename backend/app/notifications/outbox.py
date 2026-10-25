@@ -114,22 +114,3 @@ async def cancel_unprepared(session: AsyncSession, entry: Registration) -> None:
         )
     ):
         message.status = OutboxStatus.CANCELLED
-
-
-async def queue_reschedule(
-    session: AsyncSession, entry: Registration, event: Event, old_starts_at: datetime, now: datetime
-) -> None:
-    await refresh_unprepared_notices(session, entry, event)
-    await sync_reminder(session, entry, event, now)
-    payload = context(entry, event)
-    payload.update(
-        old_starts_at=old_starts_at.isoformat(), new_starts_at=event.starts_at.isoformat()
-    )
-    await enqueue(
-        session,
-        entry,
-        NotificationKind.RESCHEDULED,
-        f"rescheduled:{entry.id}:{event.schedule_version}",
-        payload,
-        now,
-    )

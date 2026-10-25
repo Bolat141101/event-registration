@@ -71,8 +71,9 @@ export function DateStamp({ value }: { value: string }) {
     </time>
   );
 }
-export function Availability({ event }: { event: EventInfo }) {
-  const started = Date.parse(event.starts_at) <= Date.now();
+export function Availability({ event, serverNow }: { event: EventInfo; serverNow: number | null }) {
+  if (serverNow === null) return <span className="availability">Уточняем статус</span>;
+  const started = Date.parse(event.starts_at) <= serverNow;
   const free = Math.max(0, event.capacity - event.confirmed);
   return (
     <span className={`availability${!started && free ? ' available' : ''}`}>

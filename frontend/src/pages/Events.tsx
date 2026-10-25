@@ -1,3 +1,4 @@
+import { Pagination } from '../components/Pagination';
 import { useState } from 'react';
 import { Availability, DateStamp, Link, LiveState, LoadState, Notice } from '../components/common';
 import { fullDate, time, timezone } from '../dates';
@@ -40,7 +41,7 @@ export function EventList() {
                 </p>
               </div>
               <div className="event-row-action">
-                <Availability event={event} />
+                <Availability event={event} serverNow={list.serverNow} />
                 <Link className="text-link" href={`/events/${event.id}`}>
                   Подробнее <span aria-hidden="true">↗</span>
                 </Link>
@@ -49,16 +50,28 @@ export function EventList() {
           ))}
         </div>
       )}
+      <Pagination list={list} />
     </main>
   );
 }
-function RegistrationForm({ id, waiting }: { id: string; waiting: boolean }) {
+function RegistrationForm({
+  id,
+  waiting,
+  ready,
+}: {
+  id: string;
+  waiting: boolean;
+  ready: boolean;
+}) {
   const [email, setEmail] = useState('');
   const [accepted, setAccepted] = useState(false);
   const action = useRegister(id);
   return (
     <aside className="registration-box">
       <p className="eyebrow">Участие</p>
+      {!ready && (
+        <Notice>Уточняем время сервера. Действия станут доступны после подключения.</Notice>
+      )}
       <h2>{waiting ? 'Присоединиться к ожиданию' : 'Зарегистрироваться'}</h2>
       {accepted ? (
         <>
@@ -106,12 +119,12 @@ function RegistrationForm({ id, waiting }: { id: string; waiting: boolean }) {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             aria-describedby={action.error ? 'registration-error' : undefined}
-            disabled={action.busy}
+            disabled={action.busy || !ready}
           />
           <div id="registration-error">
             <Notice error>{action.error?.message}</Notice>
           </div>
-          <button className="primary" disabled={action.busy}>
+          <button className="primary" disabled={action.busy || !ready}>
             {action.busy ? 'Отправляем…' : waiting ? 'Встать в лист ожидания' : 'Отправить заявку'}
           </button>
         </form>
@@ -128,7 +141,7 @@ export function EventPage({ id }: { id: string }) {
         <LoadState error={event.error} retry={event.refresh} />
       </main>
     );
-  const started = Date.parse(data.starts_at) <= Date.now();
+  const started = event.serverNow !== null && Date.parse(data.starts_at) <= event.serverNow;
   return (
     <main className="container">
       <Link className="back-link" href="/">
@@ -145,7 +158,7 @@ export function EventPage({ id }: { id: string }) {
           </div>
           <h1 className="event-description">{data.description}</h1>
           <div className="detail-meta">
-            <Availability event={data} />
+            <Availability event={data} serverNow={event.serverNow} />
             <p>
               {data.confirmed} зарегистрировано · {data.waitlisted} в ожидании
             </p>
@@ -162,7 +175,11 @@ export function EventPage({ id }: { id: string }) {
             </p>
           </aside>
         ) : (
-          <RegistrationForm id={id} waiting={data.confirmed >= data.capacity} />
+          <RegistrationForm
+            id={id}
+            waiting={data.confirmed >= data.capacity}
+            ready={event.serverNow !== null}
+          />
         )}
       </div>
     </main>

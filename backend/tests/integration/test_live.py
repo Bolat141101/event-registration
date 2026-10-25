@@ -118,3 +118,143 @@ async def test_sse_read_finishes_cleanup_when_client_cancel_scope_is_cancelled(
     assert isinstance(business.engine.pool, AsyncAdaptedQueuePool)
     assert business.engine.pool.checkedout() == 0
     assert "Exception terminating connection" not in caplog.text
+
+
+async def test_hub_shares_reads_bounds_subscribers_and_releases_last_listener(
+    business: Business,
+) -> None:
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.live import LiveCapacityError, LiveHub
+
+    event = await business.create()
+    hub = LiveHub(async_sessionmaker(business.engine), limit=10)
+    subscriptions = await asyncio.gather(*(hub.subscribe(event.id) for _ in range(10)))
+    assert hub.reads == 1 and len(hub.topics) == 1 and hub.subscribers == 10
+    with pytest.raises(LiveCapacityError):
+        await hub.subscribe(event.id)
+    for subscription in subscriptions:
+        snapshot = await subscription.queue.get()
+        assert snapshot is not None and snapshot.id == event.id
+    # Every client gets the next shared SQL snapshot, not its own poll.
+    await asyncio.gather(*(subscription.queue.get() for subscription in subscriptions))
+    assert hub.reads == 2
+    await asyncio.gather(*(subscription.close() for subscription in subscriptions))
+    assert not hub.topics and hub.subscribers == 0
+    from sqlalchemy.pool import AsyncAdaptedQueuePool
+
+    assert isinstance(business.engine.pool, AsyncAdaptedQueuePool)
+    assert business.engine.pool.checkedout() == 0
+    await hub.close()
+
+
+async def test_failed_producer_is_retired_before_reconnect_and_old_cleanup(
+    business: Business, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    import app.live as live
+    from app.services.common import EventView
+
+    event = await business.create()
+    original_read = live.read_event
+    fail_next = asyncio.Event()
+    failed = False
+
+    async def read(sessions: async_sessionmaker[AsyncSession], identity: UUID) -> EventView:
+        nonlocal failed
+        if fail_next.is_set() and not failed:
+            failed = True
+            # Real PostgreSQL failure, not a synthetic cached response.
+            async with sessions() as session:
+                await session.execute(text("SELECT 1 / 0"))
+        return await original_read(sessions, identity)
+
+    monkeypatch.setattr(live, "read_event", read)
+    hub = live.LiveHub(async_sessionmaker(business.engine))
+    old = await hub.subscribe(event.id)
+    reopened = None
+    try:
+        assert await old.queue.get() is not None
+        fail_next.set()
+        async with asyncio.timeout(5):
+            assert await old.queue.get() is None
+        await business.join(event.id, "reconnect@example.test")
+        # Reconnect before the old HTTP stream's finally has run.
+        reopened = await hub.subscribe(event.id)
+        current = await reopened.queue.get()
+        assert current is not None and current.confirmed == 1
+        assert reopened.topic is not old.topic
+        await old.close()
+        assert hub.topics[event.id] is reopened.topic
+        async with asyncio.timeout(5):
+            assert await reopened.queue.get() is not None
+    finally:
+        await old.close()
+        if reopened:
+            await reopened.close()
+        await hub.close()
+    assert hub.subscribers == 0 and not hub.topics
+
+
+async def test_initial_database_failure_allows_fresh_subscription(
+    business: Business, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    import app.live as live
+    from app.services.common import EventView
+
+    event = await business.create()
+    original_read = live.read_event
+    first = True
+
+    async def read(sessions: async_sessionmaker[AsyncSession], identity: UUID) -> EventView:
+        nonlocal first
+        if first:
+            first = False
+            async with sessions() as session:
+                await session.execute(text("SELECT 1 / 0"))
+        return await original_read(sessions, identity)
+
+    monkeypatch.setattr(live, "read_event", read)
+    hub = live.LiveHub(async_sessionmaker(business.engine))
+    try:
+        with pytest.raises(SQLAlchemyError):
+            await hub.subscribe(event.id)
+        assert not hub.topics and hub.subscribers == 0
+        reopened = await hub.subscribe(event.id)
+        try:
+            assert await reopened.queue.get() is not None
+        finally:
+            await reopened.close()
+    finally:
+        await hub.close()
+
+
+async def test_http_stream_reconnects_after_real_postgres_lock_timeout(
+    business: Business, api_clients: APIClients
+) -> None:
+    event = await business.create()
+    client = api_clients[0]
+    path = f"/api/events/{event.id}/stream"
+    async with client.stream("GET", path) as response:
+        assert response.status_code == 200
+        lines = response.aiter_lines()
+        assert (await next_snapshot(lines))["confirmed"] == 0
+        async with business.engine.begin() as connection:
+            await connection.execute(text("LOCK TABLE events IN ACCESS EXCLUSIVE MODE"))
+            # Production lock_timeout ends this producer. Wait for EOF, not a delay.
+            async with asyncio.timeout(8):
+                async for _line in lines:
+                    pass
+    await business.join(event.id, "sql-recovery@example.test")
+    async with client.stream("GET", path) as response:
+        assert response.status_code == 200
+        lines = response.aiter_lines()
+        assert (await next_snapshot(lines))["confirmed"] == 1
+        await business.join(event.id, "sql-waiting@example.test")
+        async with asyncio.timeout(5):
+            while (await next_snapshot(lines))["waitlisted"] != 1:
+                pass

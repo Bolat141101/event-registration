@@ -17,12 +17,13 @@ jobs:
   checks:
     name: Backend, PostgreSQL, frontend and Compose
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
     env:
-      COMPOSE_PROJECT_NAME: event-registration-ci
+      COMPOSE_PROJECT_NAME: event-registration-relay-check-ui-ci
+      COMPOSE_FILE: compose.yaml:compose.browser-test.yaml
       COMPOSE_ENV_FILES: .env.example
       COMPOSE_PROFILES: test
       POSTGRES_PORT: "0"
@@ -70,7 +71,9 @@ jobs:
         run: docker compose build frontend
 
       - name: Start Compose services and apply application migrations
-        run: docker compose up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications notifications-sender
+        run: |
+          BROWSER_TEST_PROJECT="$COMPOSE_PROJECT_NAME" scripts/browser-test.sh start
+          echo "PUBLIC_APP_URL=http://$(docker compose port frontend 80)" >> "$GITHUB_ENV"
 
       - name: Verify API health through frontend proxy
         run: |
@@ -131,17 +134,36 @@ jobs:
           docker compose up --no-build --no-deps -d notifications-sender
           smtp recover
 
+      - name: Real edge admission limits and shared NAT
+        run: |
+          docker compose run --rm -d --no-deps --name "$COMPOSE_PROJECT_NAME-limits" \
+            -e REGISTER_RATE=1r/m -e REGISTER_BURST=2 -e SSE_LIMIT=2 frontend
+          docker compose run --rm --no-deps -T -e LOAD_PROJECT="$COMPOSE_PROJECT_NAME" worker \
+            python - < infrastructure/checks/limit_probe.py
+          docker rm -f "$COMPOSE_PROJECT_NAME-limits"
+
+      - name: Playwright E2E against real PostgreSQL and Mailpit
+        run: |
+          export E2E_BASE_URL="http://$(docker compose port frontend 80)"
+          export E2E_MAILPIT_URL="http://$(docker compose port mailpit 8025)"
+          docker run --rm --name "$COMPOSE_PROJECT_NAME-e2e" --network host --ipc=host \
+            -v "$PWD/frontend:/work" -w /work \
+            -e E2E_BASE_URL -e E2E_MAILPIT_URL -e E2E_ISOLATED_PROJECT="$COMPOSE_PROJECT_NAME" \
+            -e E2E_ORGANIZER_KEY=local_organizer_token_change_me_32_chars_minimum \
+            node:24-bookworm sh -c 'npm ci && npx playwright install --with-deps chromium && npm run test:e2e'
+
       - name: Show Compose diagnostics on failure
         if: failure()
         run: |
           docker compose ps --all
           docker compose logs --no-color --tail=100
 
-      - name: Remove CI containers and volumes
+      - name: Remove only isolated CI containers
         if: always()
         run: |
           mailpit=$(docker compose ps -q mailpit)
           if [ -n "$mailpit" ] && [ "$(docker inspect -f '{{.State.Paused}}' "$mailpit")" = "true" ]; then
             docker compose unpause mailpit
           fi
-          docker compose down --volumes --remove-orphans
+          docker rm -f "$COMPOSE_PROJECT_NAME-e2e" "$COMPOSE_PROJECT_NAME-limits" 2>/dev/null || true
+          docker compose down --remove-orphans

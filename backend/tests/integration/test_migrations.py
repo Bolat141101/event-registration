@@ -12,6 +12,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.db.health import database_is_ready, expected_schema_heads
+from app.db.models import EmailOutbox, Event, Registration
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -38,6 +39,91 @@ async def column_count(engine: AsyncEngine, *tables: str) -> int:
         return await connection.run_sync(
             lambda sync: sum(len(inspect(sync).get_columns(table)) for table in tables)
         )
+
+
+async def test_scale_indexes_preserve_populated_tables(
+    integration_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    event_id, registration_id, message_id = [uuid4() for _ in range(3)]
+    timestamp = datetime(2026, 10, 25, 12, tzinfo=UTC)
+    indexes = {"ix_events_start", "ix_email_outbox_registration"}
+
+    async def snapshot() -> list[str]:
+        async with integration_engine.connect() as connection:
+            return [
+                str(
+                    await connection.scalar(
+                        text(
+                            "SELECT md5(jsonb_agg(to_jsonb(t) ORDER BY id)::text) "
+                            f"FROM {table} AS t"
+                        )
+                    )
+                )
+                for table in ("events", "registrations", "email_outbox")
+            ]
+
+    async def present_indexes() -> set[str]:
+        async with integration_engine.connect() as connection:
+            return set(
+                (await connection.execute(text("SELECT indexname FROM pg_indexes"))).scalars()
+            )
+
+    try:
+        async with integration_engine.begin() as connection:
+            await connection.execute(
+                Event.__table__.insert(),
+                dict(id=event_id, description="Migration fixture", starts_at=timestamp, capacity=1),
+            )
+            await connection.execute(
+                Registration.__table__.insert(),
+                dict(
+                    id=registration_id,
+                    event_id=event_id,
+                    email="migration@example.test",
+                    status="confirmed",
+                    ticket_code=f"ticket-{registration_id}",
+                    manage_token_hash=f"hash-{registration_id}",
+                    checked_in_at=timestamp,
+                ),
+            )
+            await connection.execute(
+                EmailOutbox.__table__.insert(),
+                dict(
+                    id=message_id,
+                    registration_id=registration_id,
+                    kind="ticket",
+                    dedup_key=f"ticket:{registration_id}:1",
+                    payload={"frozen": "payload", "participation_no": 1},
+                    prepared_at=timestamp,
+                    available_at=timestamp,
+                    status="forwarded",
+                    attempts=2,
+                ),
+            )
+        before = await snapshot()
+        assert indexes <= await present_indexes()
+        await migrate(integration_engine, command.downgrade, config, "0004_canonical_email")
+        assert not indexes & await present_indexes()
+        assert await snapshot() == before
+        await migrate(integration_engine, command.upgrade, config, "head")
+        assert indexes <= await present_indexes()
+        assert await snapshot() == before
+        assert (
+            await column_count(integration_engine, "events", "registrations", "email_outbox") == 24
+        )
+        await migrate(integration_engine, command.check, config)
+    finally:
+        await migrate(integration_engine, command.upgrade, config, "head")
+        async with integration_engine.begin() as connection:
+            await connection.execute(
+                EmailOutbox.__table__.delete().where(EmailOutbox.id == message_id)
+            )
+            await connection.execute(
+                Registration.__table__.delete().where(Registration.id == registration_id)
+            )
+            await connection.execute(Event.__table__.delete().where(Event.id == event_id))
 
 
 async def test_migration_round_trip(
