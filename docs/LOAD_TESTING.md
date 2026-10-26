@@ -1,45 +1,59 @@
-# Нагрузочная проверка
+# Load verification
 
-Сценарий воспроизводится `BROWSER_TEST_PROJECT=event-registration-relay-check-ui-UNIQUE LOAD_LABEL=after scripts/measure-load.sh` из чистого проекта. Скрипт запрещает существующую DB и основное имя, использует .env.example и tmpfs, не копирует данные, очищает свои контейнеры/сеть через trap без --volumes. Нужны Docker Compose, Python3 на хосте и свободные localhost ports. Результаты — JSON stdout, исходники probes в infrastructure/checks.
+Run from a **fresh isolated project**:
 
-200 одновременных POST с разными email на одно событие capacity10, p50/p95/p99/коды/средний completed throughput всплеска и sampled lock waiters каждые50ms. Затем один массовый перенос принятого населения, проверка duplicate email/queue и capacity. После этого100 SSE виртуальных клиентов держат соединения8s после initial snapshots/warmup; измеряется delta pg_stat_database.xact_commit и deadlocks. Эта delta включает heartbeat readiness/observer и не называется точным количеством SELECT. Relay/sender остановлены только на время измерения DB нагрузки. После теста они включаются, проверяется очередь и реальный Mailpit; время её разгребания считается от запуска, а не от окончания health-wait.
+```sh
+BROWSER_TEST_PROJECT=event-registration-relay-check-ui-UNIQUE LOAD_LABEL=after scripts/measure-load.sh
+# Additional connection-count check:
+BROWSER_TEST_PROJECT=event-registration-relay-check-ui-OTHER LOAD_LABEL=multi API_WORKERS=2 LOAD_VISITORS=1000 scripts/measure-load.sh
+```
 
-Посетители, соединения и RPS различаются:100 открытых SSE — не100 регистраций в секунду;200 POST здесь — всплеск, не гарантированная постоянная arrival rate. Нагрузочный клиент не запускает100 отдельных Chrome и не измеряет rendering. Отдельный дополнительный запуск `API_WORKERS=2 LOAD_VISITORS=1000` проверяет1000 SSE connections; он не является прямым сравнением одного и двух процессов на одинаковых данных.
+The script rejects the main project name/existing DB container, uses .env.example and tmpfs, and removes only its own containers/network through a trap, without --volumes. Docker Compose, host Python3 and available localhost ports are needed. Probe source is in infrastructure/checks; output is JSON. Stored raw results and SQL plans are retained, not deleted by cleanup.
 
-EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) проверяет page id, page aggregates, outbox FK lookup; after-проба дополнительно выполняет EXPLAIN для всех трёх настоящих bulk statements переноса. Фикстуры10000 events и все изменения EXPLAIN/DDL-статистики выполняются в транзакциях/savepoints с rollback; это только тестовая БД. Core columns остаются24. В больших таблицах предпочтительный plan зависит от cardinality/statistics, seq scan на маленькой таблице не объявляется ошибкой.
+## Method and what is measured
 
-Контролируемое «до»: `git archive e64a564` во временную директорию, из текущей работы копируются только measure-load.sh и probes. Теги baseline образов отделены от after. Два повтора каждой версии, каждый со свежей tmpfs DB; выполнение последовательно, без E2E/build параллельно самому измерению. Исходная предварительная проба при другой активности Docker сохраняется отдельно и не используется для сравнения p95. На target production hardware нужны более длительные arrival-rate/soak/overload тесты, latency/error budgets и запас ресурсов.
+A burst of200 concurrent POSTs with distinct emails targets one capacity10 event. Record p50/p95/p99, status counts, completed burst throughput and sampled PostgreSQL lock waiters every50ms. Then reschedule that accepted population, check duplicates/capacity and outbox, and establish100 SSE clients by default. After initial snapshots/warm-up, hold streams for an8s measurement window and observe pg_stat_database xact_commit/deadlocks. The commit delta includes observer/readiness activity; it is not an exact SELECT count.
 
-## Фактические результаты — 24 октября 2026
+Relay/sender stop only for the DB phase. They restart afterward and the delivery probe checks real Core forwarding/Mailpit messages; drain time starts **before worker startup**, not after health-wait. A separate fresh HTTP pool is used for long-lived SSE after the POST phase. Errors do not trigger hidden client retries.
 
-Полные JSON-результаты и планы PostgreSQL: [load-results/2026-10-24.json](load-results/2026-10-24.json). В каждом из пяти окончательных прогонов exit0; 200/200 регистраций получили HTTP202, мест10/ожидающих190, duplicate emails/queue numbers=0, новых deadlocks=0. После включения обработчиков принято400 заданий и Mailpit сохранил400 писем, failed=0. Остальные200 outbox — будущие напоминания, не потерянные задания.
+Visitors, requests/second and open connections differ:1000 SSE streams are not1000 registrations/second or1000 Chrome rendering sessions. A burst is not sustained arrival-rate traffic. API_WORKERS2/1000streams is an extra correctness/resource check, not a controlled comparison of process counts on identical connection populations.
 
-| Прогон | API-процессы / SSE | Регистрация p50 / p95 / p99, ms | Completed req/s всплеска | Max lock waiters | Перенос, ms | DB commits за8s SSE | Доставка400 писем, s |
+EXPLAIN ANALYZE/BUFFERS/JSON covers bounded page IDs, page aggregates, outbox registration lookup and all three actual bulk reschedule statements. Fixtures10000events and explained mutations use isolated transactions/savepoints/rollback. Seq Scan on a small table is not a failure; plans depend on cardinality/statistics. Each probe confirmed24Core columns.
+
+Controlled before: git archive e64a564 into a temporary directory, copying only the current probe/script, with separate baseline image tags. Two runs per version used fresh DBs, sequentially, without concurrent E2E/build activity during measurement. The earlier exploratory run under other Docker activity is not the controlled baseline.
+
+## Historical measured results:2026-10-24
+
+[Original JSON and plans](load-results/2026-10-24.json) are preserved. These runs used the **older, weaker acceptance criteria**: recorded values do show200×202 and expected counts, but exit0 alone did not prove all registration/outbox/SSE invariants. They are descriptive historical measurements, not standalone automated acceptance of the corrected probe.
+
+| Run | API processes / SSE | Registration p50/p95/p99,ms | Completed burst req/s | Max lock waiters | Reschedule,ms | DB commits/8s SSE | Drain400emails,s |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| До, A | 1 / 100 | 663.87 / 991.74 / 1021.67 | 188.11 | 14 | 405.54 | 791 | 6.495 |
-| До, B | 1 / 100 | 773.14 / 1167.20 / 1211.54 | 155.87 | 14 | 361.95 | 824 | 6.538 |
-| После, A | 1 / 100 | 1162.17 / 1838.41 / 1900.58 | 102.01 | 14 | 65.56 | 26 | 48.606 |
-| После, B | 1 / 100 | 693.63 / 1036.31 / 1069.43 | 180.36 | 14 | 32.99 | 12 | 8.443 |
-| После, два процесса | 2 / 1000 | 793.18 / 1224.39 / 1266.01 | 153.01 | 29 | 77.27 | 34 | 9.129 |
+| Before A | 1 /100 | 663.87/991.74/1021.67 | 188.11 | 14 | 405.54 | 791 | 6.495 |
+| Before B | 1 /100 | 773.14/1167.20/1211.54 | 155.87 | 14 | 361.95 | 824 | 6.538 |
+| After A | 1 /100 | 1162.17/1838.41/1900.58 | 102.01 | 14 | 65.56 | 26 | 48.606 |
+| After B | 1 /100 | 693.63/1036.31/1069.43 | 180.36 | 14 | 32.99 | 12 | 8.443 |
+| After, two processes | 2 /1000 | 793.18/1224.39/1266.01 | 153.01 | 29 | 77.27 | 34 | 9.129 |
 
-Все100/100 и1000/1000 SSE установились в пределах20s и оставались открытыми к окончанию наблюдения; ошибок0. Это HTTP-клиенты, не1000 браузеров. Снимки выдаются раз в секунду на событие/процесс, поэтому число SQL-транзакций практически перестало зависеть от числа подписчиков одного события. Индексы и set-based перенос снизили длительность переноса в этих замерах с362–406ms до33–66ms. Два процесса допускают больше одновременных ожидающих DB-lock запросов; блокировка одного популярного события остаётся последовательной.
+All recorded runs had10confirmed/190waiting,0duplicate emails/queue numbers and0new deadlocks;400forwarded/400Mailpit copies/failed0. The other200outbox rows were future reminders. All requested streams remained active at observation end with no recorded transport error.
 
-Ускорение регистрации **не доказано**: p95 после изменений составил1036–1838ms против992–1167ms до. Очередь также не объявляется быстрее: один after-прогон занял48.606s, максимальное ожидание готового задания достигло93.297s (в остальных after —19.415/21.709s). Все задания доставлены, в сохранённом хвосте логов этого медленного прогона нет ERROR/WARNING. Причина разброса не установлена; требуется профилирование на целевой машине и длительные повторные прогоны. Mutex добавляет обращения к PostgreSQL, поэтому его стоимость следует учитывать, но замер не доказывает, что именно он объясняет весь выброс. Порог очереди60s предназначен в том числе для выявления такого отставания.
+Shared event/process snapshots reduced observed SQL commit activity; rescheduling fell from362–406ms to33–66ms in the one-process samples. **Faster registration was not established**: after p95 was1036–1838ms versus992–1167ms before. The queue also is not claimed faster: after-A took48.606s, with maximum ready-job age93.297s. Its saved log tail had no ERROR/WARNING, but the cause is unresolved and requires profiling/longer repeated target-hardware tests. The singleton adds DB calls, but these measurements do not prove it explains that whole outlier. A60s overdue alert is intended to reveal such lag.
 
-До окончательной серии были неуспешные пробы: повторное использование HTTP-pool после200 POST приводило к RemoteProtocolError до первого SSE-снимка и на исходной, и на текущей версии. Нагрузочный клиент теперь закрывает тот pool и создаёт отдельный для SSE. Повторные попытки подключения в probe не добавлялись; требование всех соединений и exit1 при ошибках сохранено. Предварительный baseline при параллельной работе Docker не используется для сравнения. Приложение не менялось специально для получения этих цифр.
+On10000events, bounded page plans used ix_events_start / Index Only Scan instead of Sort+Seq Scan and limited to21IDs. Full plans retain buffers/timing, including small-table sequential scans. A separate populated migration regression hashes all three tables across0005 downgrade0004/upgradehead and checks indexes,24columns and alembic check; rows/tickets/check-in/prepared payload remain unchanged.
 
-## SQL и границы выводов
+Preliminary failed runs reused POST keep-alive sockets and saw RemoteProtocolError before the first snapshot on both versions. A separate fresh SSE pool fixed that probe setup issue. No reconnect retries or relaxed all-clients requirement were added; failed preliminary runs were not silently used as successful results.
 
-На10000 временных мероприятий страница использует `ix_events_start` / Index Only Scan вместо Sort+Seq Scan; LIMIT читает21 строку. EXPLAIN ANALYZE также выполнен для агрегатов страницы, поиска outbox по registration_id и всех трёх bulk SQL переноса. Полные plans/buffers/timing сохранены в JSON, включая планы с Seq Scan на маленьком outbox: это допустимое решение планировщика. Во всех пяти реальных БД запрос к information_schema подтвердил **24 колонки Core**.
+## Corrected strict criteria and actual control run
 
-Миграция0005 добавляет только два индекса. Отдельная PostgreSQL-регрессия на заполненных events/registrations/email_outbox сравнивает хеш полного JSON каждой таблицы до downgrade0004 и после upgradehead, проверяет удаление/возврат индексов,24 колонки и alembic check. Данные, подготовленный payload, билет и checked_in_at сохраняются.
+The audit found that the old conditions allowed200×500 with0registrations and partial success, and did not validate SSE state/deadlocks/outbox. Corrected criteria require:
 
-Восемь секунд наблюдения не являются soak-тестом, тысяча открытых соединений не доказывает тысячу регистраций в секунду. Не измерены длительная перегрузка, распределённые источники, большой набор разных активных событий, production SMTP/железо и распределение пользователей по NAT. Для production нужны согласованные latency/error/queue budgets и профиль самого популярного мероприятия, а не только средние показатели.
+- All200 HTTP202, exactly10confirmed/190waiting,600pending jobs **for that event**, with worker/sender stopped for the DB phase.
+- No duplicate emails/queue positions or new deadlocks.
+- All requested/established streams still active, no transport/parser/task errors, at least two valid snapshots per client and latest message age<=3s.
+- SSE fields/types/id/counts/schedule agree with the acknowledged HTTP reschedule; aware server_time is required. Z and+00:00 denote the same instant.
+- Invalid JSON, EOF, child-task failure or incomplete results produce a nonzero exit. Engine/client/task cleanup remains explicit.
 
-## Уточнение после аудита probe
+This is a fixed correctness scenario, not a generic benchmark allowing an unspecified error percentage. Test barriers, not sleep, synchronize regressions; timed8s measurement/poll periods are part of the benchmark itself.
 
-Пять замеров выше выполнены прежней версией probe: в JSON действительно записаны200×202 и ожидаемые счётчики, но сам exit0 тогда не гарантировал полноту регистрации/очереди и валидность SSE. Их нельзя использовать как самостоятельную автоматическую приёмку. Данные сохранены для прозрачности, не заменяются выдуманными результатами.
+At2026-10-24T19:52:13+05:00, the corrected probe ran with2API/1000SSE and exited0:200×202,10/190,600pending,1000established/active,9000valid messages,stale0/errors0/deadlocks0/duplicates0,29commits/8s. Registration p951770.01ms;400forwarded/Mailpit400,failed0,drain10.308s,maxdue23.458s. [Strict JSON/EXPLAIN](load-results/2026-10-24-audit.json). Its fresh project was cleaned automatically. This is not another controlled before/after comparison.
 
-Критерии исправленной версии: все200 HTTP202, ровно10 confirmed/190 waitlisted,600pending задач именно этого события (worker/sender остановлены на время DB-фазы), отсутствие дублей/deadlocks, все запрошенные SSE активны, минимум два валидных снимка на клиента и последнее сообщение не старше3s. Поля/типы/идентификатор/счётчики/расписание SSE сравниваются с подтверждённым HTTP-результатом переноса; ISO Z и+00:00 эквивалентны. Некорректный JSON, EOF, ошибка обработчика или любой неполный результат приводят к ненулевому exit. Это тест с фиксированными ожидаемыми результатами, не универсальный benchmark с допустимым процентом ошибок. Engine/HTTP clients/tasks освобождаются при завершении/сбое. Измерительные интервалы8s и polling периода остаются частью методики, не средством синхронизации регрессионных тестов.
-
-Фактический контроль исправленного probe (`2026-10-24T19:52:13+05:00`): `BROWSER_TEST_PROJECT=event-registration-relay-check-ui-audit-load-20261024 LOAD_LABEL=audit-strict API_WORKERS=2 LOAD_VISITORS=1000 scripts/measure-load.sh`, exit0.200×202;confirmed10/waitlisted190;600pending;1000established/active,9000 валидных сообщений,stale_clients0/errors0/deadlocks0/duplicates0. DB commits за8s29;registration p951770.01ms;400forwarded/Mailpit400,failed0,drain10.308s,max due23.458s. Это дополнительная проверка исправленной методики, не новое контролируемое сравнение до/после. Полные JSON и EXPLAIN — [2026-10-24-audit.json](load-results/2026-10-24-audit.json). Проект автоматически очищен trap без --volumes.
+Eight seconds is not a soak test. Long overload, many distinct active events, distributed sources/NAT patterns, production SMTP and target hardware remain to be measured against agreed latency/error/backlog budgets. Hot-event writes remain serialized by PostgreSQL; adding API processes does not remove that business lock.

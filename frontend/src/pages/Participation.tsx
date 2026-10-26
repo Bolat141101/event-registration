@@ -14,13 +14,13 @@ export function ParticipationPage({ token }: { token: string }) {
   if (!token)
     return (
       <main className="container narrow">
-        <p className="eyebrow">Моё участие</p>
-        <h1>Откройте ссылку из письма</h1>
+        <p className="eyebrow">My participation</p>
+        <h1>Open the link from your email</h1>
         <p>
-          Для доступа нужна приватная ссылка из первого письма о регистрации. После перезагрузки
-          страницы откройте её заново.
+          Use the private link from your first registration email. Open it again after reloading
+          this page.
         </p>
-        <Link href="/">К афише</Link>
+        <Link href="/">Browse events</Link>
       </main>
     );
   if (!data)
@@ -40,17 +40,17 @@ export function ParticipationPage({ token }: { token: string }) {
   const status =
     data.status === 'confirmed'
       ? checked
-        ? 'Вы уже отмечены на входе'
-        : 'Участие подтверждено'
+        ? 'You are checked in'
+        : 'Participation confirmed'
       : data.status === 'waitlisted'
-        ? 'Вы в листе ожидания'
-        : 'Участие отменено';
+        ? 'You are on the waitlist'
+        : 'Participation cancelled';
   return (
     <main className="container narrow">
       <Link className="back-link" href={event.data ? `/events/${data.event_id}` : '/'}>
-        ← К мероприятию
+        ← Event details
       </Link>
-      <p className="eyebrow">Моё участие</p>
+      <p className="eyebrow">My participation</p>
       <h1>{status}</h1>
       {event.data ? (
         <div className="participation-event">
@@ -61,58 +61,56 @@ export function ParticipationPage({ token }: { token: string }) {
           <p className="muted">{timezone}</p>
         </div>
       ) : (
-        <Notice error>{event.error?.message ?? 'Загружаем мероприятие…'}</Notice>
+        <Notice error>{event.error?.message ?? 'Loading event…'}</Notice>
       )}
       <Notice error>{participant.error?.message}</Notice>
       <Notice>{participant.notice}</Notice>
       {data.status === 'confirmed' && data.ticket_code && (
         <section className="ticket" aria-labelledby="ticket-title">
           <div className="ticket-heading">
-            <h2 id="ticket-title">Ваш билет</h2>
-            <span>{checked ? 'Использован' : 'Действующий'}</span>
+            <h2 id="ticket-title">Your ticket</h2>
+            <span>{checked ? 'Used' : 'Valid'}</span>
           </div>
-          <p>{checked ? 'Этот билет уже использован.' : 'Покажите этот код на входе'}</p>
+          <p>{checked ? 'This ticket has already been used.' : 'Show this code at the entrance'}</p>
           <code data-testid="ticket-code">{data.ticket_code}</code>
           <button
             className="secondary"
             onClick={() => {
               if (!navigator.clipboard) {
-                setCopyMessage('Выделите код и скопируйте вручную.');
+                setCopyMessage('Select the code and copy it manually.');
                 return;
               }
               void navigator.clipboard
                 .writeText(data.ticket_code!)
-                .then(() => setCopyMessage('Код скопирован.'))
-                .catch(() => setCopyMessage('Не удалось скопировать. Выделите код вручную.'));
+                .then(() => setCopyMessage('Code copied.'))
+                .catch(() => setCopyMessage('Could not copy. Select the code manually.'));
             }}
           >
-            Скопировать код
+            Copy code
           </button>
           <p className="muted" role="status">
             {copyMessage}
           </p>
           {checked && (
             <p>
-              Отмечен {fullDate(data.checked_in_at!)} в {time(data.checked_in_at!)} · Алматы
+              Checked in on {fullDate(data.checked_in_at!)} at {time(data.checked_in_at!)} · Almaty
             </p>
           )}
         </section>
       )}
       {data.status === 'waitlisted' && (
         <p className="participation-note">
-          Если место освободится, оно перейдёт первому в очереди. При подтверждении участия вам
-          придёт письмо с билетом.
+          When a place becomes available, it goes to the first person waiting. You will receive a
+          ticket email when your place is confirmed.
         </p>
       )}
       {data.status === 'cancelled' && (
         <p className="participation-note">
-          Билет больше не действует. До начала мероприятия можно вернуться: при наличии места
-          участие подтвердится, иначе вы попадёте в конец листа ожидания.
+          This ticket is no longer valid. You can rejoin before the event starts: take an available
+          place or join the end of the waitlist.
         </p>
       )}
-      {!timeReady && (
-        <Notice>Уточняем время сервера. Для изменения участия восстановите связь.</Notice>
-      )}
+      {!timeReady && <Notice>Checking server time. Reconnect to change your participation.</Notice>}
       <div className="participation-actions">
         {!started && !checked && (
           <button
@@ -123,10 +121,10 @@ export function ParticipationPage({ token }: { token: string }) {
             }}
           >
             {participant.busy
-              ? 'Сохраняем…'
+              ? 'Saving…'
               : data.status === 'cancelled'
-                ? 'Восстановить участие'
-                : 'Отказаться от участия'}
+                ? 'Rejoin event'
+                : 'Cancel participation'}
           </button>
         )}
         <button
@@ -136,11 +134,11 @@ export function ParticipationPage({ token }: { token: string }) {
             void participant.refresh();
           }}
         >
-          Обновить статус
+          Refresh status
         </button>
       </div>
       {started && !checked && (
-        <p className="muted">Мероприятие началось. Изменить участие уже нельзя.</p>
+        <p className="muted">The event has started. Participation can no longer be changed.</p>
       )}
       <LiveState status={event.live} />
     </main>

@@ -26,7 +26,7 @@ def clock_dependency(request: Request) -> Clock:
 
 def participant_token(credentials: Credentials) -> str:
     if credentials is None or len(credentials.credentials) > 256:
-        raise Unauthorized("authentication_required", "Нужен Bearer-токен")
+        raise Unauthorized("authentication_required", "Bearer token required")
     return credentials.credentials
 
 
@@ -35,7 +35,7 @@ def organizer_access(request: Request, credentials: Credentials) -> None:
     if credentials is None or not secrets.compare_digest(
         credentials.credentials.encode(), settings.organizer_token.get_secret_value().encode()
     ):
-        raise Unauthorized("invalid_organizer_token", "Неверный ключ организатора")
+        raise Unauthorized("invalid_organizer_token", "Invalid organizer key")
 
 
 type DatabaseSession = Annotated[AsyncSession, Depends(session_dependency)]

@@ -21,7 +21,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
 async def event(session: AsyncSession, capacity: int = 1) -> Event:
     item = Event(
-        description="Описание события",
+        description="Event description",
         starts_at=datetime.now(UTC) + timedelta(days=2),
         capacity=capacity,
     )

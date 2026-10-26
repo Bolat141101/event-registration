@@ -15,7 +15,7 @@ def message(kind: str = "ticket") -> NotificationMessage:
     payload = {
         "recipient": "user@example.test",
         "event_id": str(uuid4()),
-        "description": "Событие\nBcc: victim@example.test",
+        "description": "Event café\nBcc: victim@example.test",
         "starts_at": "2030-01-03T12:00:00Z",
         "schedule_version": 1,
         "participation_no": 1,
@@ -51,11 +51,11 @@ def test_render_all_kinds_and_no_header_injection(kind: str) -> None:
     assert str(parsed["Message-ID"]) == f"<{command.message_id}@example.test>"
     assert parsed["Bcc"] is None and parsed["Subject"]
     text = parsed.get_content()
-    assert "Событие" in text and "http://localhost:8080/registration#token=private-token" in text
-    assert "Версия расписания: 1" in text and "снимок" in text
+    assert "Event café" in text and "http://localhost:8080/registration#token=private-token" in text
+    assert "Schedule version: 1" in text and "snapshot" in text
     assert ("private-ticket" in text) == (kind != "waitlist")
     if kind == "rescheduled":
-        assert "Прежнее начало" in text and "Новое начало" in text
+        assert "Previous start" in text and "New start" in text
     assert "private-token" not in repr(email) and "user@example.test" not in repr(email)
 
 
@@ -164,3 +164,15 @@ def test_legacy_ascii_case_mime_preserves_headers_and_bytes() -> None:
     prepared = load_prepared(command, data)
     assert prepared.data == data and prepared.recipient == "user@example.test"
     assert prepared.sender == "events@example.test"
+
+
+def test_legacy_prepared_email_remains_byte_identical_after_copy_translation() -> None:
+    command = message()
+    mail = BytesParser(policy=policy.SMTP).parsebytes(
+        render(command, "events@example.test", "http://localhost:8080", datetime.now(UTC))
+    )
+    mail.replace_header("Subject", "Legacy notification")
+    # Deliberately retain non-English legacy content; deployment must not rewrite MIME.
+    mail.set_content("Legacy message: \u0411\u0438\u043b\u0435\u0442", charset="utf-8")
+    frozen = mail.as_bytes()
+    assert load_prepared(command, frozen).data == frozen

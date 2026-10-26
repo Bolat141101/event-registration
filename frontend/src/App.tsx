@@ -54,34 +54,34 @@ export function App() {
   else
     content = (
       <main className="container narrow">
-        <h1>Такой страницы нет</h1>
-        <Link href="/">Вернуться к афише</Link>
+        <h1>Page not found</h1>
+        <Link href="/">Back to events</Link>
       </main>
     );
   return (
     <>
       <a className="skip-link" href="#page-start">
-        К содержимому
+        Skip to content
       </a>
       <header className="site-header">
         <div className="container header-inner">
-          <Link className="brand" href="/" aria-label="События — афиша">
+          <Link className="brand" href="/" aria-label="Events — listings">
             <span aria-hidden="true" className="brand-mark" />
-            События<span className="brand-caption">Афиша встреч</span>
+            Events<span className="brand-caption">Event listings</span>
           </Link>
-          <nav aria-label="Основная навигация">
+          <nav aria-label="Main navigation">
             <Link href="/" aria-current={path === '/' ? 'page' : undefined}>
-              Афиша
+              Events
             </Link>
             <Link
               href="/organizer"
               aria-current={path.startsWith('/organizer') ? 'page' : undefined}
             >
-              Организатору
+              Organizer
             </Link>
             {organizerKey && (
               <button className="text-button" onClick={() => setOrganizerKey('')}>
-                Выйти
+                Sign out
               </button>
             )}
           </nav>
@@ -91,8 +91,8 @@ export function App() {
         {content}
       </div>
       <footer className="site-footer container">
-        <span>События · регистрация на мероприятия</span>
-        <span>Все даты — по времени Алматы</span>
+        <span>Events · event registration</span>
+        <span>All dates are shown in Almaty time</span>
       </footer>
     </>
   );

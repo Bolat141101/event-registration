@@ -1,25 +1,25 @@
-export const timezone = 'Время Алматы · UTC+5';
+export const timezone = 'Almaty time · UTC+5';
 const options = { timeZone: 'Asia/Almaty' };
 export const fullDate = (value: string) =>
-  new Intl.DateTimeFormat('ru-RU', {
+  new Intl.DateTimeFormat('en-GB', {
     ...options,
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   }).format(new Date(value));
 export const time = (value: string) =>
-  new Intl.DateTimeFormat('ru-RU', {
+  new Intl.DateTimeFormat('en-GB', {
     ...options,
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
   }).format(new Date(value));
 export const day = (value: string) =>
-  new Intl.DateTimeFormat('ru-RU', { ...options, day: '2-digit' }).format(new Date(value));
+  new Intl.DateTimeFormat('en-GB', { ...options, day: '2-digit' }).format(new Date(value));
 export const month = (value: string) =>
-  new Intl.DateTimeFormat('ru-RU', { ...options, month: 'short', year: 'numeric' })
-    .format(new Date(value))
-    .replace(' г.', '');
+  new Intl.DateTimeFormat('en-GB', { ...options, month: 'short', year: 'numeric' }).format(
+    new Date(value)
+  );
 export function dateInput(value: string): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     ...options,
@@ -37,9 +37,9 @@ export function dateInput(value: string): string {
 }
 export function inputToISO(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(value))
-    throw new Error('Укажите дату и время.');
+    throw new Error('Enter a date and time.');
   const date = new Date(`${value}+05:00`);
-  if (!Number.isFinite(date.valueOf())) throw new Error('Укажите корректную дату.');
+  if (!Number.isFinite(date.valueOf())) throw new Error('Enter a valid date.');
   return date.toISOString();
 }
 export function takePrivateToken(): string {

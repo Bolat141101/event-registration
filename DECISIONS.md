@@ -1,331 +1,177 @@
-# Журнал решений
+# Decision history
 
-Все временные метки — реальные контрольные отметки часов, преобразованные в `Asia/Almaty` (`UTC+05:00`). Время записи предложения не означает время его утверждения. Ранее обсуждённым условиям не приписывается выдуманное время сообщения.
+All timestamps are recorded clock observations converted to Asia/Almaty UTC+05:00. Recording a proposal is not approval, and unknown earlier chat times have not been reconstructed. This English edition preserves the sequence, decisions and material verification facts; the original wording remains in Git at [dff7a3766075453d6987256ef6d92f45d77e7f0d](https://github.com/Bolat141101/event-registration/blob/dff7a3766075453d6987256ef6d92f45d77e7f0d/DECISIONS.md). Historical omissions below describe their stage, **not** current missing UI/SSE/SMTP. Current design is ARCHITECTURE.md.
 
-## Подтверждённые исходные условия
+## Initial conditions:2026-10-19T22:37:22+05:00
 
-Зафиксировано `2026-10-19T22:37:22+05:00` по результатам текущего обсуждения и анализа.
+The user selected assignment9, the PDF as the only reviewer requirements source, Python/FastAPI/PostgreSQL/SQLAlchemy/Alembic/React/TypeScript/Compose/Pytest, minimal reliable design and SOLID/KISS/DRY without unnecessary abstractions. No paid accounts/external runtime APIs; “Mailpi” was confirmed to mean Mailpit. Git progression and a separate10-sentence essay were additional user deliverables, not a PDF essay requirement. Architecture/documents were authorized first; no functionality/commits until approval.
 
-- Пользователь выбрал кейс №9 и указал PDF единственным источником требований проверяющих.
-- Предпочтительный стек пользователя: Python/FastAPI, PostgreSQL/SQLAlchemy/Alembic, React/TypeScript, Docker Compose, Pytest.
-- Пользователь подтвердил минимальную надёжную архитектуру, корректность бизнес-логики, безопасную конкуренцию, читаемость, тестируемость и простой запуск; SOLID/KISS/DRY без ненужных абстракций.
-- Платные аккаунты и внешние runtime API исключены. На уточняющий вопрос пользователь подтвердил, что «Mailpi» означает Mailpit.
-- К сдаче дополнительно обязательны Git-история и отдельное эссе из 10 предложений. Само PDF допускает показать развитие коммитами, логом сессии или решений и не содержит требования такого эссе.
-- Пользователь принимает архитектуру. На текущем этапе разрешены REQUIREMENTS.md, ARCHITECTURE.md, DECISIONS.md и DEVELOPMENT_LOG.md; функциональность и Git-коммиты до согласования запрещены.
+### Original D01–D10 proposals, pending at that timestamp
 
-## Исходные архитектурные предложения от 2026-10-19
+| ID | Proposal | Rationale / consequence |
+| --- | --- | --- |
+| D01 | Modular FastAPI, React SPA, PostgreSQL, same-image worker and Compose | Separate client/server, one business-rule implementation; no unnecessary Redis/Celery/services at that stage |
+| D02 | Shared organizer secret and participant management tokens, no accounts | Prevent cancellation by knowing email, avoid a password/account subsystem; individual audit/RBAC deferred |
+| D03 | events/registrations/email_outbox; ticket/queue on registration, calculated aggregates | UNIQUE event/email, no redundant counters or tickets/waitlist tables; explicit CHECK/service invariants |
+| D04 | READ COMMITTED + event FOR UPDATE, one Session per operation | Fresh state after lock, works between processes; Python mutex inadequate, SERIALIZABLE needs retries; only one event serialized |
+| D05 | Event-locked waitlist sequence, atomic cancel/promotion | Unambiguous FIFO; no stolen-place window, untrusted client timestamps or SKIP LOCKED participant skipping; rejoin at tail |
+| D06 | Persistent outbox with leases/retries/stable Message-ID; Mailpit dedup/store | Atomic business/task commit, disclose SMTP ambiguity and prove local dedup with faults; **leases proposal later removed** |
+| D07 | One reminder for confirmed/waiting across moves; catch up only before start | Proposed interpretations A01–A03; alternatives change recipients/dedup and needed approval |
+| D08 | One-second SSE snapshots including initial/reconnect | Simple one-way live statistics, local target<=2s, no broker/replay log; polling/NOTIFY were alternatives after measurement |
+| D09 | UTC storage, Almaty display, pre-start registration/cancel/move, check-in from start, fixed capacity | Project interpretation of unspecified boundaries, not extra PDF text |
+| D10 | Real PostgreSQL, Mailpit, two browsers and staged evidence | SQLite/mocks/one tab cannot prove core invariants; real history, README and essay at their proper stages |
 
-Все D01–D10 записаны с контрольной отметкой `2026-10-19T22:37:22+05:00`, после подготовки архитектурного предложения. На тот момент статус: **предложено, ожидает согласования пользователя**. Таблица сохранена как история; изменённые решения заменены редакцией от 2026-10-20 ниже. В частности, исходная поддержка leases в D06 больше не применяется. Подтверждение стека/Mailpit не означает утверждение всех деталей архитектуры.
+Traceability: D01->G01–G04/G08–G10/U01–U03; D02->G05/C02/C03/C05/C06/A08; D03–D05->C03–C11/C14/A04/A05; D06–D07->C08/C10/C12/C13/C16/A01–A03; D08->G11/C07/C15/A09; D09->C01/C12/C14/C16/A06/A07; D10->G06/G07/G12–G18/U04–U07.
 
-| ID | Предложение | Почему / альтернатива / последствие |
-|---|---|---|
-| D01 | Модульный FastAPI backend, React SPA, PostgreSQL; отдельный worker из того же backend-образа, Compose | Отдельные client/server выполняют PDF; один код бизнес-правил. Worker обеспечивает автономную работу расписания. Redis/Celery и микросервисы увеличили бы число компонентов без необходимости для этого объёма |
-| D02 | Без аккаунтов участников; общий секрет организатора и секретный токен управления регистрацией | PDF разрешает любую модель входа. Это закрывает произвольную отмену по одному email без реализации регистрации/паролей. Общий секрет ограничивает индивидуальный аудит; полноценный RBAC отложен |
-| D03 | Три таблицы events, registrations, email_outbox; билет и очередь — поля регистрации; агрегаты вычисляются | Одно место на event/email закреплено UNIQUE; отдельные таблицы tickets/waitlist и дублирующие счётчики сейчас не дают преимуществ. Цена — состояние регистрации имеет явно проверяемые CHECK/сервисные инварианты |
-| D04 | READ COMMITTED + event SELECT FOR UPDATE для всех мутаций; одна Session на операцию | Все API-процессы соблюдают один порядок; после блокировки читается актуальная занятость. Python mutex не работает между процессами; SERIALIZABLE потребовал бы больше повторов. Сериализация ограничена одним событием |
-| D05 | FIFO по выдаваемому под event-lock waitlist_seq; отмена и продвижение атомарны | Есть однозначный порядок и нет окна для перехвата места. Timestamp клиента ненадёжен; SKIP LOCKED в очереди участников мог бы пропустить первого. Повторное вступление после отказа ставит в хвост |
-| D06 | Персистентный outbox, leases/retries и стабильный Message-ID; Mailpit с подавлением дублей и volume | Commit состояния и задания вместе предотвращает потерю письма при сбое API. Обычный SMTP не даёт exactly-once. Локальную дедупликацию Mailpit необходимо доказать fault-injection тестом; конфигурация и пределы гарантии раскрыты в ARCHITECTURE.md §7 |
-| D07 | Напоминание confirmed и waitlisted один раз за событие/регистрацию; перенос не повторяет уже отправленное; пропущенное досылается только до начала | Предлагаемая трактовка «всем» и «ровно одно»; ждёт продуктового решения A01–A03. Альтернативы: только confirmed либо одно напоминание на каждую новую дату. Они меняют получателей/дедупликацию и требуют согласования |
-| D08 | SSE со снимком БД раз в секунду, initial/reconnect snapshot; целевой live ≤2 секунды локально | Для двух клиентов просто, не нужен брокер или собственный журнал событий. Возможная альтернатива — HTTP polling той же частоты; SSE удобен для единого потока и состояния соединения. LISTEN/NOTIFY можно добавить после измерений при необходимости |
-| D09 | UTC в БД, отображение Алматы; до начала — регистрация/отказ/перенос, с начала — чекин; лимит фиксирован после создания | Правила закрывают неописанные границы и избегают усложнения изменения вместимости. Это проектное предложение A06–A07, а не требование PDF; можно изменить до реализации |
-| D10 | Реальный PostgreSQL для гонок, Mailpit для email, два браузера для live; поэтапная сдача с доказательствами | Mock/SQLite/одна вкладка не подтверждают критические свойства. Тесты следуют инвариантам и приёмочным сценариям, не повторяют реализацию. Git-коммиты, README и эссе создаются на соответствующих следующих этапах |
+### Tool/model facts recorded during initial analysis
 
-## Связь с требованиями
-
-| Решение | Основные требования |
-|---|---|
-| D01 | G01–G04, G08–G10, U01–U03 |
-| D02 | G05, C02/C03/C05/C06, A08 |
-| D03–D05 | C03–C11/C14, A04/A05 |
-| D06–D07 | C08/C10/C12/C13/C16, A01–A03 |
-| D08 | G11, C07/C15, A09 |
-| D09 | C01/C12/C14/C16, A06/A07 |
-| D10 | G06/G07/G12–G18, U04–U07 |
+Codex desktop was already the user's workspace/tool. The session identified the agent as GPT-6 based, but did not establish an exact serving model identifier. No model benchmark or invented quality/speed comparison was used; exact displayed model metadata remains to be confirmed if available. Local PDF reading/editing/testing in one workspace motivated continued use of the tool.
 
-## Использованные модель и инструмент: факты текущего этапа
+PDF extraction used pypdf after unavailable PyMuPDF, with Poppler visual inspection. The PDF skill and an openai-docs reference were read; public documentation was not used to guess a private runtime model ID. No subagents, copied application/scaffold or generator was used. PostgreSQL/Mailpit primary references informed engineering choices. Later borrowing/generation would need explicit attribution.
 
-Инструмент — Codex desktop. Агент работает в общем workspace, читает PDF и редактирует Markdown через доступные инструменты. В системном описании агент обозначен как Codex на базе GPT-6; точный идентификатор обслуживающей модели в доступном контексте этого этапа не указан. Нельзя выдавать имя предполагаемой версии или список доступных моделей за подтверждение фактически использованной модели. Перед итоговой сдачей точное отображаемое имя модели нужно сверить с настройкой этой сессии и дополнить запись, если оно доступно.
+## Revision2:2026-10-20T08:49:34+05:00
 
-Причина продолжения работы в этой среде: Codex уже используется пользователем и позволяет совместить чтение локального ТЗ, подготовку файлов и проверку изменений в одном рабочем каталоге. Агент не выбирал модель сравнительным экспериментом; причины исходного выбора конкретной модели пользователем неизвестны. В итоговом README это следует описать честно, без выдуманного сравнения качества/скорости моделей.
+The user requested one background worker/outbox, removal of unnecessary coordination, no secret reissue by email and explicit alternatives. These were authorized constraints; implementation/A01–A09 approval was not inferred merely from the new message.
 
-На текущем этапе использован навык PDF для извлечения текста и визуальной сверки. Первая попытка через PyMuPDF завершилась ошибкой отсутствующего модуля; затем применён доступный pypdf, страницы отрисованы Poppler. Также прочитан справочный SKILL.md openai-docs при проверке необходимости описания инструмента; отдельный поиск модели/сравнение моделей не выполнялись, публичная документация не использовалась для угадывания runtime ID. Субагенты не запускались.
+| ID | Revised proposal / reason |
+| --- | --- |
+| D01 | One sequential sender, no scheduler; persisted due reminders survive restart |
+| D02 | First token by email only; any public existing-email repeat is no-op; resume needs token/generation |
+| D03 | Three tables, then12outbox fields; remove redundant event FK/recipient/version/message-ID/leases/updated_at, combine deadlines as available_at |
+| D04 | Keep READ COMMITTED/event lock; remove extra explicit registration/outbox row locks; fresh post-lock reads and bounded DB failure handling |
+| D05 | Promotion stays in cancellation commit, independent of worker/mail |
+| D06 | Remove leases/processing, retain prepared_at and computed stable Message-ID; test kill-before/after acceptance |
+| D07 | One reminder with explicit prepare boundary: unprepared can change/cancel, attempted must retry unchanged |
+| D08 | Keep SSE after WebSocket comparison; transport alone does not reduce SQL polling latency |
+| D09 | Time/fixed-capacity proposals unchanged pending their approval |
+| D10 | Test singleton operation/token safety and real DB races instead of unimplemented multi-worker lease expiry |
+| D11 | Remove redundant stats and liveness/readiness pair; retain distinct cancel/resume/check-in/move operations |
+| D12 | PostgreSQL outbox; no broker/Celery/notifications service at that stage; a broker does not close DB/publish or SMTP ambiguity |
+| D13 | Preserve access/business/notification boundaries for later growth without speculative users/organizers/interfaces |
+| D14 | Initially singleton by deployment: stop old before new, no rolling overlap; later superseded by DB enforcement |
 
-Чужое приложение, шаблон или генератор проекта не использованы. Документы подготовлены агентом по PDF и указаниям пользователя. Для технической проверки прочитаны первичные источники PostgreSQL и Mailpit; ссылки приведены в ARCHITECTURE.md. Будущую генерацию Vite, использование шаблонов или заимствование кода фиксировать отдельно по факту.
+Links: D01/D03/D06/D14->U08/C08/C12/C13; D02/D11->U09/A04; D04/D05->C09–C11/C14; D08/D12/D13->U10/C15. Single-sender throughput, Mailpit privacy, no RBAC and dedup limits remained explicit. Primary PostgreSQL/Celery/Redis/WHATWG/Mailpit sources informed the comparison, not a claim that alternatives are universally inferior. No application code/tests were added in this proposal stage.
 
-## Как продолжать журнал
+## CI:2026-10-20T15:14:14+05:00
 
-Актуальная редакция — в следующем разделе; исходная таблица выше не должна использоваться для реализации отменённых механизмов.
+One ubuntu-24.04 job for push/main and PR/main used existing Dockerfiles/Compose/manifests/locks, no extra GitHub PostgreSQL/setup stacks. Ruff/format/Mypy/full Pytest, upgrade/test/check, frontend TypeScript/Vite and proxied health ran without suppressing errors. Separate project/.env.example/random ports kept main data independent; PostgreSQL default5433 was preserved/configurable. Checkout was pinned to SHA3d3c42e5aac5ba805825da76410c181273ba90b1 with contents:read and no credential persistence.
 
-После ответа пользователя добавить новую реальную метку, какие D/A приняты или изменены и почему. Не заменять «предложено» на «принято» до ответа. Сохранять историю существенного изменения решения и его последствия для тестов/требований. Не записывать планируемые действия как уже выполненные.
+Actionlint1.7.12 was temporary, not an app dependency. Run blocks/environment were extracted for local execution; checkout/GitHub runner itself was not emulated. Initial CI cleanup removed only its test containers/volumes; later tmpfs CI cleanup no longer removes volumes. No push/remote run was claimed. [Workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax), [checkout commit](https://github.com/actions/checkout/commit/3d3c42e5aac5ba805825da76410c181273ba90b1).
 
-## Редакция 2: упрощение по замечаниям пользователя
+## Schema revision3:2026-10-21T21:31:30+05:00
 
-Контрольная отметка записи: `2026-10-20T08:49:34+05:00`. Пользователь явно поручил оставить один background worker и transactional outbox, убрать безопасно устранимую координацию, исключить повторную выдачу токена по email и обосновать альтернативы. Эти ограничения приняты как входные указания. Реализация приложения не разрешена; детали ниже — итоговые предложения на согласование. Новое сообщение не утверждает прежние A01–A09 автоматически.
+The user authorized variant3 implementation. Earlier12outbox fields were superseded by10, total5+9+10=24. No users table without accounts/profiles. Remove title/audit dates/next sequence; copy normalized email into email and enforce CHECK/UNIQUE. The original spelling is lost; future services would own format/identity rules.
 
-| ID | Актуальное решение / изменение | Обоснование и проверка |
-|---|---|---|
-| D01 | Модульный backend, SPA, PostgreSQL и один последовательный отправитель; отдельного scheduler нет | Напоминания записываются бизнес-транзакцией в outbox; после рестарта достаточно читать due-задания. Проверить первоначальную постановку, перенос и рестарт |
-| D02 | Первый токен только в письме; публичные повторы email для всех статусов — no-op; resume по токену и номеру участия | В прежнем описании восстановление cancelled могло допускать выдачу нового токена по email. Закрыто явно: секрет сохраняется, не выдаётся заново; тесты чужого email/токена, параллельного resume и старого cancel |
-| D03 | Три таблицы сохранены; outbox сокращён до 12 полей | Удалены event_id/составной FK, отдельные recipient/версии, message_id, leases, updated_at; два срока объединены в available_at. Контекст — типизированный payload; контракт полей в ARCHITECTURE.md §7 |
-| D04 | READ COMMITTED + один event-lock сохранены; дополнительные явные row-locks registrations/outbox убраны | Общее событие достаточно для бизнес-конкуренции. Нужны новые SELECT после получения lock; SERIALIZABLE сравнен, bounded retries описаны. Проверить гонки в нескольких API-процессах |
-| D05 | FIFO-продвижение остаётся частью транзакции отказа, не работой worker | С выключенной почтой место всё равно получает первый ожидающий. Без этого возникает окно перехвата места новым запросом |
-| D06 | Leases/processing удалены; prepared_at и стабильный SMTP Message-ID сохранены, Message-ID вычисляется из id | Даже один процесс может упасть после SMTP accept. Нужны неизменное письмо и дедупликация получателя; тесты crash/restart с Mailpit обязательны |
-| D07 | Прежнее предложение одного reminder сохранено с точной границей prepared_at | Не начатое можно перепланировать/отменить, уже начатое повторяется неизменным даже при смене даты/статуса. Физически отозвать SMTP нельзя; A01–A03 ждут согласования |
-| D08 | SSE сохранён после сравнения с WebSocket | Статистика односторонняя; reconnect EventSource проще. При одном и том же DB polling WebSocket не уменьшает задержку; тестировать два клиента и reconnect |
-| D09 | Временные правила и фиксированный capacity пока без изменений | Новые замечания их не согласовали; A06/A07 остаются предложениями |
-| D10 | Тесты уточнены под одного отправителя и безопасность токена | Убраны проверки нескольких worker/истёкших leases, сохранены kill-before/after-send, неизменность письма, FIFO без worker и реальные PostgreSQL-гонки |
-| D11 | Удалить `/stats` и пару `/health/live`/`ready`; оставить detail/stream и один `/health` | Дублирование не нужно локальной сдаче. Resume, cancel, check-in и перенос не объединяются: их правила действительно различаются |
-| D12 | Оставить PostgreSQL outbox; Celery/Redis и сервис уведомлений не вводить | Ни брокер, ни Celery не закрывают окно DB commit/publish и не дают exactly-once SMTP. Будущий переход требует relay и нового протокола нескольких consumers; сравнение в §12 |
-| D13 | Сохранить только границы access, бизнес-операций, notifications/SMTP | Позднее возможны users/organizers, другие уведомления и рост нагрузки; сейчас без пустых интерфейсов, новых таблиц или broker abstraction |
-| D14 | Ровно один worker — условие развёртывания, stop старого до start нового | Это сознательная замена распределённой координации эксплуатационным условием. Параллельный запуск отправителей и rolling overlap не поддерживаются; ограничения указаны в README-плане и тестах |
+MAX(active waitlist_seq)+1 uses a **separate SELECT after event-lock**, with insertion in the same transaction and no helper commit. Tail reuse is allowed. Retain participation_no, schedule_version, prepared_at, stable outbox ID, dedup keys and typed payload. Queue numbers cannot substitute for participation generations or move versions. ticket:registration:participation, reminder:registration and rescheduled:registration:version remain separate identities.
 
-Связь новых решений с требованиями: D01/D03/D06/D14 → U08 и C08/C12/C13; D02/D11 → U09 и A04; D04/D05 → C09–C11/C14; D08/D12/D13 → U10 и C15. U08–U10 добавлены по текущему сообщению пользователя. Ограничения производительности одного SMTP worker, приватность Mailpit, отсутствие полноценного RBAC и область гарантии дедупликации сохранены явно.
+0001 stayed unchanged;0002 handles the simplification. Populated downgrade is forbidden under locks on all three tables because title/original email/audit/history cannot be honestly reconstructed; use a pre-upgrade backup, never invented dates. Tests cover empty round-trip, populated preservation/refusal and independent connections observing blocking/commit/rollback/MAX. At that historical stage only infrastructure/health existed; unchanged API/worker/frontend contracts were not evidence of registration/FIFO/check-in/SMTP implementation.
 
-Проверены первичные документы PostgreSQL, Celery, Redis, WHATWG и Mailpit; ссылки расположены рядом с соответствующими утверждениями в ARCHITECTURE.md. Выбор для нашего проекта — инженерный вывод, а не утверждение, что альтернативы всегда медленнее или менее надёжны. Код, зависимости и тесты приложения на этом этапе не добавлялись.
+## Business API:2026-10-22T11:27:56+05:00
 
-## GitHub Actions CI
+User authorization covered services/API/access/outbox, not yet SMTP/SSE/full screens. Keep24columns and existing migrations. Services are functions accepting Session/Clock, one begin/commit per operation, no repository/UoW. Event-lock covers registration/cancel/resume/move/check-in; fresh reads after waiting and separate MAX helper preserve cross-process last-place/FIFO behavior.
 
-Контрольная отметка: `2026-10-20T15:14:14+05:00`. Пользователь разрешил настройку и локальную проверку CI, запретил Git push и переход к следующему этапу до подтверждения.
+Bearer management tokens are256random bits, stored as SHA-256 for lookup; tickets are separate192-bit random values with UNIQUE and replacement on reassignment. Secrets stay out of URLs/query/public bundles/responses/logs. Email-validator2.3.0 and dnspython2.9.0 were locked with external checks disabled; dots/+suffixes and local.test remain. Later IDNA correction superseded trim/lower-only identity.
 
-- Один job на `ubuntu-24.04`, запускаемый push в main и PR с целевой веткой main. Все проверки выполняются существующими Dockerfile, Compose-сервисами, manifests и lock-файлами; отдельных PostgreSQL services GitHub, setup-python/setup-node или новых зависимостей приложения нет.
-- Backend: Ruff check/format, Mypy и полный Pytest. Тестовый сервис сохраняет свой исходный command: Alembic upgrade → Pytest (включая integration) → Alembic check. Никакие тесты/предупреждения/ошибки не исключаются ради CI.
-- Frontend: Docker-сборка выполняет существующие npm ci и npm run build, включающие TypeScript и Vite. Полный запуск приложения проверяет миграции рабочей БД и точный JSON health через frontend proxy.
-- Изоляция: отдельный COMPOSE_PROJECT_NAME, .env.example вместо локальных секретов, свободные порты и собственные volumes. Существующий пользовательский порт PostgreSQL 5433 сохранён по умолчанию и стал настраиваемым через POSTGRES_PORT; в CI все опубликованные порты равны 0.
-- После ошибки — диагностика Compose, после любого результата — удаление CI-контейнеров/volumes. Ошибки проверок не маскируются continue-on-error. Обычный проект event-registration не останавливается.
-- Checkout закреплён полным SHA официального v7.0.1, token permissions ограничены contents:read, persist-credentials отключён. Проверены первичные документы [GitHub workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) и [официальный release commit checkout](https://github.com/actions/checkout/commit/3d3c42e5aac5ba805825da76410c181273ba90b1).
+One SQL aggregate produces all counts; checked-in is a subset of confirmed. Outbox identities are generation/version based, not queue based. Only the first ticket/waitlist contains manage_path. Prepared payload/identity/deadline/state remain immutable; unprepared failed context can refresh without automatically resetting attempts/error or reactivating it. One reminder lasts across rejoin/moves, including waiting; unprepared cancellation/resume adjusts the same row, prepared/sent do not reset.
 
-Локальная проверка workflow проведена actionlint 1.7.12 как временным инструментом, не зависимостью проекта. Команды и environment локального прогона извлечены из самого workflow; GitHub runner и checkout локально не эмулировались. Полный запуск на GitHub остаётся неподтверждённым до публикации, которую агент не выполняет без решения пользователя.
+Same current date is a no-op before version/time rejection; another date with stale version conflicts. A->B->A uses schedule_version. Old-generation cancel conflicts; idempotent resume can return the resulting active generation but cannot resurrect a subsequently cancelled cycle. Time is checked after event-lock in UTC. Lock timeout2s/statement timeout3s map temporary DB failures to safe503 without blind retries. An ambiguous COMMIT is not proof of rollback; event creation has no separate idempotency key.
 
-## Редакция 3 схемы: реализация варианта 3
+At2026-10-22T11:36:03+05:00, privacy review chose the same neutral202 after event start for new/existing valid public emails, without creating participation/outbox.202-versus409 would reveal prior registration. Other prohibited time transitions retain409; regression checks unchanged rows and post-lock clock use.
 
-Время записи: `2026-10-21T21:31:30+05:00` (получено из текущих UTC-часов). Основание — прямое указание пользователя реализовать согласованный вариант 3. Исторические записи о 12 полях outbox выше относятся к редакции 2; актуальная схема содержит 10 полей outbox и 24 поля суммарно.
-
-| Решение | Причина / последствия | Проверка |
-|---|---|---|
-| Три таблицы: 5 + 9 + 10 колонок, без users | Аккаунтов/профилей нет; отдельная сущность email не нужна. Удалены дополнительные название, аудитные даты и счётчик очереди | SQL information_schema, соответствие ORM миграции |
-| Единственный email после strip/lower; ORM-валидатор и DB CHECK, UNIQUE(event_id,email) | Прежний email_normalized копируется в email при upgrade; повтор во всех статусах не создаёт новую запись. Исходный регистр теряется; формат/неизменность адреса будет проверять бизнес-сервис | ORM insert/update, прямой SQL, варианты регистра/пробелов и cancelled |
-| MAX активной очереди + 1 только после event-lock отдельным SELECT | Нет изменяемого счётчика. Хвост может использоваться снова, новые участники всегда после оставшихся. Вставка/обновление обязательно в той же транзакции; helper не делает commit | Два соединения с pg_blocking_pids, commit/rollback, пустая очередь, удаление хвоста и продвижение |
-| participation_no и schedule_version сохранены | Номера участия защищают resume/старую отмену; версии даты — повторные переносы и их уведомления. Не заменяются переиспользуемым waitlist_seq | Сохранность при миграции; проверки бизнес-конфликтов ещё потребуют сервисов |
-| prepared_at, стабильный outbox.id, dedup_key и payload сохранены | Сохраняются основа неизменяемого письма и ключи ticket:registration:participation, reminder:registration, rescheduled:registration:version. sent требует prepared_at; sent_at не нужен для выбора задач | Миграция сохраняет подготовленное письмо, уникальность dedup_key, CHECK sent; реальная отправка пока не реализована |
-| 0001 неизменна; добавлена 0002. Downgrade только для пустых таблиц | Отдельное название/оригинальный email/аудитные даты/исторический максимум восстановить нельзя. Заполненный downgrade явно запрещён под блокировкой всех трёх таблиц; не подставляем выдуманные даты. Для заполненной БД нужен pre-upgrade backup | Round-trip пустой БД, upgrade с данными, отказ populated downgrade и неизменность head |
-| API/worker/frontend не требуют правок контракта на этом этапе | Есть только health/OpenAPI и UI готовности; worker только probe, ссылок на удаляемые поля нет. Не добавляем бизнес-функции вне этапа | Пересборка, типы, smoke доступных маршрутов; честный список ещё не реализованных функций в README |
-
-Один последовательный worker, PostgreSQL, Mailpit и согласованный будущий SSE сохранены. Redis/Celery/leases не добавлялись; план расширения через SKIP LOCKED/leases/идемпотентность остаётся в docs/WORKER_EVOLUTION.md. Ни число колонок, ни тесты переходов ORM сами по себе не обеспечивают последнее место, автоматическое FIFO, однократный чекин или SMTP-доставку — эти сервисы отсутствуют и должны быть реализованы следующими согласованными этапами.
-
-## Backend бизнес-операции и HTTP — 2026-10-22
+At2026-10-22T11:42:36+05:00, recreated API caused Nginx502 from a cached obsolete upstream IP. Docker resolver127.0.0.11, valid5s/timeout2s and variable proxy_pass without URI fixed rediscovery; temporary outage/DNS-cache502 remains possible. [proxy_pass](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_pass), [resolver](https://nginx.org/en/docs/http/ngx_http_core_module.html#resolver).
 
-Контрольная отметка: `2026-10-22T11:27:56+05:00`. Пользователь разрешил сервисы/API/доступ/постановку outbox и их проверки. SMTP, обработчик отправочных retries, SSE и полноценные экраны исключены из этого этапа.
-
-| Решение | Причина и компромисс | Подтверждение |
-|---|---|---|
-| Схема 24 колонки и обе миграции сохранены | Для всех операций достаточно существующих версий, состояний и payload; users и дополнительный аудит не нужны | Alembic check/round-trip и схема PostgreSQL проверяются отдельно |
-| Сервисы — функции с Session и Clock; один begin/commit на операцию | Явные транзакционные границы без Repository/UoW; вспомогательные SQL/outbox-функции не делают commit | Сервисные/API и fault-injection тесты с реальным rollback |
-| Event-lock общий для регистрации, отмены/resume, переноса и чекина | После ожидания заново читается состояние; последнее место и FIFO защищены между процессами | Два независимых соединения одновременно ждут event-lock; наблюдение pg_blocking_pids |
-| Существующий next_waitlist_seq повторно используется | MAX отдельным запросом после lock, вставка в той же транзакции, хвост можно использовать снова | Конкурентные тесты и сценарии очереди |
-| Участник и организатор используют Authorization: Bearer | Нет секретов в URL/query или frontend bundle; случайный токен 256 бит, SHA-256 только для поиска/хранения в registrations | Отсутствующие/неверные токены, hash в БД, нейтральный публичный ответ, отсутствие секретов в ответах/логах |
-| Случайный билет 192 бита + UNIQUE | Билет отделён от токена управления и заменяется при новом назначении; прошлый код после отмены не действует | Конкурентный чекин, старые/чужие/неизвестные билеты, resume |
-| Валидатор email с отключёнными DNS/SMTP-проверками | Надёжная проверка формата без самодельного regex и внешних API. email-validator 2.3.0 и его dnspython 2.9.0 закреплены; прочие версии сохранены, включая greenlet для Linux | Нормализация trim/lower, точки/+суффиксы и некорректные адреса; поддержка локальных .test |
-| Счётчики формируются одним агрегирующим SQL | Нет смешивания трёх снимков или дополнительных колонок; checked_in входит в confirmed | Проверки API и конкурентного чекина |
-| Ключи outbox: ticket/waitlist:reg:participation; reminder:reg; rescheduled:reg:schedule_version | Идентичность не зависит от переиспользуемого номера очереди. Токен только в manage_path первого ticket/waitlist; повтор его не извлекает | Однократная постановка, повторы, A→B→A, отмена/resume |
-| Prepared payload/идентичность/срок/статус API не меняет | SMTP мог уже принять письмо; ссылка/билет в старом письме не гарантируют актуальность участия. Реальная отправка — следующий этап | Подготовленные pending/sent сохраняются при переносе/отмене/resume |
-| Failed без prepared актуализируется, но не переводится автоматически в pending | Не вводим скрытый обработчик retries; сохраняем attempts/last_error | Проверка смены даты без сброса диагностики |
-| Одно напоминание на жизнь записи, включая очередь | Явно выбран существующий A01–A03: позднее вступление — due сейчас, отмена отменяет unprepared, resume реактивирует ту же строку; prepared/sent не сбрасываются | Сроки, версии, сохранение ID и однократность reminder |
-| Совпадающая текущая дата — no-op до проверки версии/времени; другая со stale version — 409 | Повтор не перезаписывает новое значение и не создаёт рассылку. A→B→A различается schedule_version | Сервисные и HTTP-проверки повторов/конфликтов |
-| Cancel со старым participation_no — 409; resume-повтор возвращает следующий активный цикл | Повтор после потери ответа не создаёт новое участие; уже отменённый следующий цикл старым запросом не воскрешается | Конкурентный resume и запоздалая отмена |
-| Lock timeout 2s, statement timeout 3s; временные DB-ошибки → 503, без автоматических retries | Нет частичного успеха после известного rollback. Неопределённый COMMIT нельзя представить как доказанный откат; создание события не имеет отдельного idempotency key | Реальный timeout под внешней блокировкой и повтор после освобождения; сокрытие DB-параметров |
+## Async Core:2026-10-22T16:20:48+05:00
 
-Локальные временные правила реализованы как контракт этапа: create/new date в будущем; новые register/cancel/resume/schedule до начала; check-in начиная с момента старта. Время берётся через подменяемый Clock после event-lock и сравнивается в UTC. Идемпотентные no-op завершённых операций могут возвращаться после начала. Доставка, live UI и recovery потерянного токена пока не реализованы.
-
-Дополнение после ревью, контрольная отметка `2026-10-22T11:36:03+05:00`: для публичного POST регистрации после начала выбран одинаковый нейтральный 202 и для нового, и для существующего корректного email, без создания нового участия/outbox. Иначе сочетание 202 для повтора и 409 для нового адреса раскрывает наличие записи. Это явное разрешение противоречия приватности и временного запрета, а не разрешение поздней регистрации. Остальные новые запрещённые по времени переходы возвращают 409. Добавлен регрессионный HTTP-тест с проверкой неизменности данных; временные тесты сохраняют проверку чтения Clock после event-lock. Схема не меняется.
-
-Техническое исправление запуска, контрольная отметка `2026-10-22T11:42:36+05:00`: после пересоздания API обычный Nginx давал 502 из-за сохранённого старого IP upstream. В frontend/nginx.conf добавлены Docker resolver 127.0.0.11 (valid=5s, timeout=2s) и переменная proxy_pass без URI. Это не новый экран/протокол, а устранение реально воспроизведённой ошибки обновления. Синтаксис и проксирование проверены; поведение resolver и сохранение URI сверены с [NGINX proxy_pass](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_pass) и [NGINX resolver](https://nginx.org/en/docs/http/ngx_http_core_module.html#resolver). Во время остановленного API/короткого DNS-кэша возможен временный 502, но старый адрес не сохраняется бессрочно.
-
-
-## Переход Core API на async — 2026-10-22
-
-Контрольная отметка: `2026-10-22T16:20:48+05:00`. Переход разрешён прямым запросом пользователя; это изменение доступа к БД, бизнес-контракты этапа 2 сохранены.
-
-| Решение | Причина и компромисс | Проверка |
-|---|---|---|
-| AsyncSession + asyncpg; DSN только postgresql+asyncpg | Ожидание PostgreSQL не блокирует event loop; синхронный psycopg удалён из зависимостей, остальные версии сохранены | Полный PostgreSQL Pytest, Mypy, отсутствие синхронных DB-вызовов в Core |
-| Одна сессия/транзакция на операцию, expire_on_commit=False | Сессия не потокобезопасна и не допускает совместного использования задачами; явные await без скрытого reload после commit | Независимые asyncio-задачи конкурируют за реальный event-lock; отмена задачи откатывает запись и outbox |
-| READ COMMITTED, event FOR UPDATE и MAX отдельным statement сохранены | Async не заменяет ACID/блокировки и не ускоряет последовательные мутации одного события | Последнее место, одинаковый email, FIFO, cancel/resume/checkin и rollback |
-| Alembic AsyncConnection.run_sync, прежние revision-файлы без изменений | Официальный адаптер Alembic/SQLAlchemy выполняет SQL через asyncpg; новая схема не требуется | Round-trip пустой тестовой БД, upgrade данных 0001→0002, запрет потери данных downgrade, check и SHA256 прежних файлов |
-| asyncio для инфраструктурного worker, один процесс | Общий async-драйвер без второго стека БД; доставка/leases/Celery по-прежнему отложены | Запуск/завершение контейнера и readiness БД; SMTP этим этапом не заявляется |
-| Временные ошибки подключения asyncpg сохраняют 503 без секретов | asyncpg может выдавать OSError/TimeoutError до SQLAlchemy DBAPI wrapper | API/health регрессии ошибок соединения, настоящий lock timeout |
+AsyncSession/asyncpg and only postgresql+asyncpg DSNs replaced synchronous psycopg without changing business contracts. Each task owns a Session/transaction, expire_on_commit=False avoids implicit reload; async does not remove event serialization. Alembic uses AsyncConnection.run_sync, old revisions unchanged; only the synchronous public test harness runs Alembic in a thread. Cancellation rolls back participation/outbox; asyncpg OSError/TimeoutError before SQLAlchemy wrapping still map to safe503.
 
-Основание для адаптации: [SQLAlchemy asyncio](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html), [Alembic asyncio cookbook](https://alembic.sqlalchemy.org/en/latest/cookbook.html#using-asyncio-with-alembic), [SQLAlchemy asyncpg dialect](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#asyncpg). `run_sync` не используется как обход асинхронности бизнес-сервисов.
-
-## Инфраструктурное разделение Core + Notifications — 2026-10-22
-
-Контрольная отметка: `2026-10-22T22:42:22+05:00`. Пользователь разрешил только инфраструктуру и уточнил владение: Core — бизнес-данные и неизменяемый payload, Notifications — будущее формирование/сохранение MIME. Это заменяет вариант подготовки MIME в Core, обсуждавшийся в архитектурном предложении; он не внедрялся.
-
-| Решение | Причина / компромисс | Фактическая проверка |
-|---|---|---|
-| Существующий backend/frontend сохраняются; Notifications — отдельный проект с namespace notifications_app | Нет переноса бизнес-кода, общего ORM или дублирования правил участия; свои зависимости/миграции/тесты | SHA256 всех tracked backend/frontend файлов и OpenAPI совпадают с началом этапа |
-| Один PostgreSQL, две прикладные БД и обычные роли | Минимум контейнеров, запрет доступа к чужим данным; общий сбой PostgreSQL затронет оба сервиса | Реальные подключения в обоих направлениях отклонены с 42501; rolsuper/createdb/createrole/replication/bypassrls=false |
-| Прежний POSTGRES_USER — только технический администратор | До этапа Core использовал суперпользователя events; Core/worker/migrate переведены на core_app без изменения кода | Все 129 Core тестов дополнительно прошли под core_app_test |
-| Отдельный повторяемый db-bootstrap вместо initdb.d | Init-скрипты не обновляют существующий PGDATA; SQL-quoting через psql format, адресное ALTER OWNER без изменения строк | Заполненные Core и Notifications сохранены после первого/повторного bootstrap; PostgreSQL container/volume прежние |
-| notification_jobs: id, payload, mime nullable, status, attempts, available_at, last_error | Семь колонок, без преждевременного аудита/leases/recipient-колонок. MIME будет записан будущим обработчиком один раз; текущая схема не обеспечивает всю бизнес-идемпотентность/неизменность | PostgreSQL constraints, уникальность внешнего UUID, payload/MIME round-trip и rollback |
-| Только Notifications GET /health | Никакого HTTP relay/приёма заданий, SMTP или UI до следующего разрешения. Readiness проверяет только свою revision/БД; ошибка подключения возвращает 503 без DSN | Unit и реальные DB health-тесты, в том числе чужая/отсутствующая БД и неверный пароль |
-| Core не зависит от процесса Notifications | Доступность бизнес-операций сохраняется; outbox не передаётся в другой сервис на этом этапе | На изолированном стеке при остановленном Notifications через HTTP созданы событие/две регистрации/FIFO/четыре outbox-задания; основная установка health/events=200 |
-| Новая миграция только Notifications, Core revision остаётся 0002 | Ничего не добавляем в Core outbox до этапа relay; forwarded не реализован | Alembic check обоих проектов; Notifications downgrade запрещён на непустой таблице |
-| Существующий CI расширен, Core/frontend проверки сохранены | Свои lint/format/Mypy/Pytest и миграции Notifications; startup/readiness и stop-service independence | Команды выполнены локально; удалённый GitHub Actions не запускался |
-
-Операционные детали и ограничения — [docs/NOTIFICATIONS_INFRASTRUCTURE.md](docs/NOTIFICATIONS_INFRASTRUCTURE.md). Не реализованы приём заданий, фиксация payload/MIME, sender/retries, Kafka, Redis, новый UI и SSE. Добавление колонок не объявляется реализацией этих функций.
+The infrastructure worker became asyncio based, but delivery/leases/Celery remained outside that stage. Full PostgreSQL concurrency/migration/type checks confirmed behavior. [SQLAlchemy asyncio](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html), [Alembic cookbook](https://alembic.sqlalchemy.org/en/latest/cookbook.html#using-asyncio-with-alembic), [asyncpg dialect](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#asyncpg).
 
-## Обычная роль Core в CI и автоматическая проверка bootstrap — 2026-10-22
+## Service infrastructure split:2026-10-22T22:42:22+05:00
 
-Контрольная отметка: `2026-10-22T23:09:28+05:00`. Изменение разрешено прямым запросом пользователя; основная установка и volumes не используются.
+The user authorized infrastructure only and clarified ownership: Core immutable logical payload, Notifications future MIME. An earlier proposal of MIME in Core was never implemented. Existing backend/frontend hashes/OpenAPI remained unchanged; Notifications gained its independent namespace/dependencies/Alembic/tests.
 
-| Решение | Причина / компромисс | Проверка |
-|---|---|---|
-| Core test использует core_app_test и зависит от test-db-bootstrap | Администратор больше не скрывает недостаток прав обычной прикладной роли; владелец собственной БД сохраняет необходимые DDL-права для миграций | Полный Pytest и Alembic upgrade/downgrade/check; фикстура проверяет имя роли, флаги и членство |
-| Отдельный bootstrap-test вместо административных credentials в Core test | Bootstrap должен создавать БД/роли; прикладные тесты не должны иметь эти возможности | Только test-db в tmpfs, точные имена тестовых БД/ролей, без Docker socket и основных volumes |
-| Повторно вызывается настоящий shell/psql bootstrap, не копия SQL | Проверяется вся существующая последовательность скриптов; psql требуется в дополнительном test-only Docker target | Два повтора с данными: строки обеих БД, payload/MIME, Alembic, владельцы/ACL, индексы/constraints, реальные отказы 42501 |
-| Использованы существующие Python-зависимости Core test | Нет отдельного стека тестирования инфраструктуры; исходники миграций Notifications подключены read-only | Ruff/format и strict Mypy инфраструктурного теста; миграции обоих проектов под обычными ролями |
-| Три Pytest-набора выполняются последовательно | Миграционные тесты изменяют схему, параллельный запуск на одном test-db был бы некорректен | Core → Notifications → bootstrap-test в CI |
+One PostgreSQL/two ordinary roles/databases minimized containers but shared server failures. Core/worker/migrate stopped using the administrator;129Core tests also passed under core_app_test. Repeatable db-bootstrap replaced initdb-only assumptions, preserves seeded rows on existing volume, uses quoted psql SQL and targeted ownership changes. Real reverse connections failed42501 and role privilege flags were false.
 
-Тест проверяет повторяемость на уже заполненных БД в работающем PostgreSQL. Перезапуск/авария самого PostgreSQL, атомарность CREATE DATABASE всего кластера и сбой в середине bootstrap этим тестом не моделируются. Бизнес-логика, схема и прежние миграции не менялись.
+Seven-field notification_jobs included nullable MIME but did not yet implement inbox/delivery guarantees. Only own-DB health was exposed at that stage. Core worked with Notifications stopped: event, two participants/FIFO/four outbox rows and health/events200. Only Notifications gained a migration then; Core stayed0002. No SMTP/HTTP relay/UI/SSE was claimed yet. Later sections explicitly implement them.
 
-## Асинхронный HTTP relay и inbox v1 — 2026-10-22
+## Ordinary-role CI/bootstrap:2026-10-22T23:09:28+05:00
 
-Контрольная отметка `2026-10-22T23:53:58+05:00`. Реализация разрешена прямым запросом пользователя. SMTP/Kafka остаются вне этапа.
+Core tests use core_app_test, reject admin flags/memberships and retain own-DB DDL for migrations. A separate test-only bootstrap target uses isolated administrative credentials/psql, not a Docker socket or main volume. The real shell/SQL bootstrap is invoked twice with rows in both DBs, checking payload/MIME/Alembic, owners/ACL/default privileges/indexes/constraints and42501denials. Notifications migrations mount read-only.
 
-| Решение | Причина и компромисс | Проверка |
-|---|---|---|
-| Прежний worker стал одним последовательным async relay | Минимум процессов, прежние бизнес-транзакции не знают о сети; параллельные relay пока не поддерживаются | Core конкурентные тесты сохранены; crash/retry и реальный SIGKILL |
-| Короткие prepare/finish транзакции, HTTP между ними | Не держать event-lock/соединение во время сети; внешний результат может быть неизвестен | HTTP handler в тесте проверяет отсутствие idle transaction и свободный event FOR UPDATE NOWAIT |
-| Freeze envelope v1 + prepared_at до HTTP | Один message_id/JSON при потере ACK, отмене, resume и переносах; возможен поздний исторический снимок | Сохранность байтов retry, подготовка до crash, два PostgreSQL + lost commit response |
-| Новая Core revision 0003: forwarded, без новых колонок | HTTP acceptance нельзя назвать SMTP sent; старые данные и 24 колонки сохраняются | Upgrade/downgrade/check; downgrade с forwarded явно запрещён |
-| Защищённый POST и INSERT ON CONFLICT + сравнение JSON | Commit предшествует ACK; конкуренция координируется PostgreSQL PK, без очередного брокера | Конкурентные идентичные запросы=202/одна строка, разные данные=409, защита=401 |
-| Весь envelope хранится в прежнем NotificationJob.payload | Нет дополнительных version/hash/recipient-колонок; сравнение нормализованного JSON достаточно для текущего объёма | JSON Schema обеих моделей, DB-снимки, MIME/status/attempts при повторе не сбрасываются |
-| Схема v1 в docs, локальные DTO в двух независимых проектах | Не вводить общий runtime-пакет/бизнес-слой; совместимость фиксируется контрактными тестами | Сравнение JSON Schema с артефактом и сквозной приём |
-| Ограниченный устойчивый retry, exponential backoff, общий deadline | attempts/available_at переживают рестарт; после лимита требуется явное вмешательство, задания не удаляются | 408/429/5xx/transport/deadline, неверный ACK, постоянные 4xx, restart |
-| Исторические версии принимаются без latest-wins | Не потерять начальную секретную ссылку или отдельный перенос при задержке/перестановке; порядок доставки не обещается | Два поколения/версии в обратном порядке, retry после бизнес-изменений |
-| Реальный HTTP fault smoke включён в CI | ASGI/Mock не доказывают поведение TCP/процессов | Реальный разрыв TCP после commit, перезапуск Notifications/relay, конкурентные повторы |
-
-Неподготовленные отменённые/устаревшие задания и просроченный reminder отбрасываются под event-lock. Уже prepared повторяется неизменным даже после утраты актуальности: получатель мог сделать commit. Failed может означать неизвестный исход, поэтому повтор сохраняет прежние ID/payload/prepared_at. Default лимит — 8 начатых попыток; восстановление после более долгого простоя требует явного retry. Никаких SMTP sent, MIME rendering, leases, Kafka или новой бизнес-логики участия не добавлено. Подробный контракт — [docs/NOTIFICATION_PROTOCOL.md](docs/NOTIFICATION_PROTOCOL.md).
+Core, Notifications and bootstrap suites run sequentially because migration tests share the test DB. This proves repeated bootstrap on populated running PostgreSQL, not crash-atomic CREATE DATABASE of the whole cluster or failure halfway through bootstrap. Business rules/schema/old migrations stayed unchanged.
 
-
-## Устранение head-of-line blocking relay — 2026-10-23
+## HTTP relay/inboxv1:2026-10-22T23:53:58+05:00
 
-Контрольная отметка: `2026-10-23T09:06:53+05:00`. Изменение разрешено прямым запросом пользователя; существующая незакоммиченная работа сохранена.
+The user authorized async HTTP delivery, not yet SMTP/Kafka. Existing worker became a sequential relay. Short prepare/finish transactions surround network; test handlers prove no idle transaction and free event FOR UPDATE NOWAIT during HTTP. Core freezes the completev1 envelope/prepared_at before sending; same ID/content survives ACK loss, cancellation/resume/moves and crashes.
 
-| Решение | Причина и компромисс | Проверка |
-|---|---|---|
-| Ограниченная страница голов разных мероприятий, RELAY_CANDIDATE_LIMIT=20 (1–100) | Несколько писем занятого события не заполняют всю страницу. DISTINCT ON сохраняет выбор первого готового pending по available_at/id внутри события | Несколько писем A/B: при lock A передаются только B1/B2/B3, затем A1/A2/A3 |
-| UUID round-robin, курсор и cutoff готовности между вызовами | Постоянный занятый префикс не монополизирует выборку; новые будущие ready-задания входят в следующий конечный обход. Глобальный приоритет самого раннего письма между независимыми событиями заменён справедливым обходом | Страница 2, четыре занятых события перед свободным пятым; новые задания в середине обхода; restart/idle |
-| SELECT FOR UPDATE NOWAIT только в prepare relay | Нужные проверки актуальности/версий остаются под event-lock. Занятый lock не удерживает последовательный relay; бизнес-сервис блокировок регистрации не меняется | Реальный PostgreSQL event-lock, включая уже prepared payload; реальный HTTP к Notifications |
-| Только 55P03 пропускается после полного выхода/rollback prepare | NOWAIT и настоящий lock_timeout не оставляют failed-транзакцию/частично подготовленное письмо. Другие DBAPIError не скрываются | Lock timeout на outbox UPDATE, неизменность полей и свободный event-lock после rollback; division-by-zero распространяется |
-| Один HTTP за run_once; полностью занятая страница возвращает False | Прежний worker делает паузу, затем продолжает следующую страницу; нет активного бесконечного retry и постоянного blacklist | Ограничение числа попыток prepare за вызов; занятое A передаётся после unlock |
-| Курсор только в памяти, без новых DB-полей | Не владение заданием: после рестарта durable pending снова обнаруживаются. При большом числе занятых страниц возможна задержка на poll interval каждой страницы | Полный Core/Notifications/infra Pytest и SIGKILL/restart HTTP smoke |
-
-Схема, старые миграции, FIFO участников, registration API/токены и правила prepared payload не менялись. При lock skip не изменяются attempts/available_at/payload/prepared_at/last_error. HTTP acceptance по-прежнему означает forwarded, не SMTP delivery; идемпотентность message_id/envelope сохранена. Порядок среди готовых писем одного события остаётся available_at/id, а прежний retry backoff может отсрочить отдельное письмо: строгий порядок принятия всех писем после сетевых сбоев не добавлялся. Несколько relay/leases/SKIP LOCKED остаются будущим этапом.
+0003 adds forwarded without columns; downgrade rejects forwarded rows instead of relabeling SMTP sent. Protected Notifications insert-on-conflict plus normalized JSON comparison commits before202; concurrent identical IDs give202/one row, conflicting content409, missing auth401. Entire envelope stays in existing payload: no hash/recipient/version columns or shared runtime package. Both DTO schemas are tested against the docs artifact.
 
+Persisted bounded backoff/deadline handles408/429/5xx/transport/invalid ACK; other errors remain failed. Older generations/versions are accepted as historical snapshots without latest-wins, preserving the initial management link and each move. Unprepared stale/cancelled/post-start reminders are suppressed under event-lock; frozen commands repeat unchanged because remote commit may already have happened. Failed can mean unknown acceptance; default8started attempts, explicit intervention beyond budget. Real TCP response-loss/restart/concurrent-ID probes were added to CI; no SMTP-sent claim, MIME rendering or leases yet.
 
-## Асинхронная SMTP-доставка в Notifications — 2026-10-23
+## Relay head-of-line fix:2026-10-23T09:06:53+05:00
 
-Контрольная отметка: `2026-10-23T09:59:38+05:00`. Пользователь разрешил SMTP через локальный Mailpit, без нового UI/SSE. Перед этапом дерево было чистым, HEAD c4215d3 (`add reliable async notification delivery`).
+A bounded page selects heads of distinct events (default20,1–100), preserving due `(available_at,id)` within an event. UUID round-robin/cutoff replaces global oldest-event dominance so many locked events do not starve an independent one. New work joins the next finite traversal; one HTTP action per run_once, false/pause if blocked.
 
-| Решение | Причина и компромисс | Проверка |
-|---|---|---|
-| Один отдельный notifications-sender, aiosmtplib 5.1.3 | SMTP не блокирует event loop/API, нет второго sender из FastAPI lifespan; один процесс без leases | Реальные SMTP TCP отказы/timeout, SIGKILL/restart; дальнейший параллелизм требует отдельного claim-протокола |
-| Core prepared_at и Notifications mime IS NOT NULL — две разные границы | Прежний Core замораживает логический JSON, Notifications сохраняет MIME+attempt/backoff до сети. Новые колонки/миграции не нужны | Байты/To/From/Date/Message-ID сохраняются при retry, смене SMTP_FROM и времени, отмене/переносе/рестарте |
-| SMTP sendmail получает сохранённые bytes, envelope извлекается из MIME | Не пересериализовать и не пересоздавать Date/ID на повторе; задан local_hostname без синхронного getfqdn | Сравнение заголовков/тела Mailpit с PostgreSQL MIME, повреждённые адрес/ID отклоняются |
-| Новые plain-text шаблоны четырёх видов, явный исторический смысл | Нет HTML/template engine, description только в теле, приватная ссылка из Core + PUBLIC_APP_URL; UI ещё отсутствует | MIME unit-тесты, нет header injection; IDN без SMTPUTF8 |
-| Источник актуальности/сроков остаётся Core, без latest-wins в Notifications | Сохраняется v1 и прежнее решение о исторических снимках. После Core freeze отмена не отзывает уже переданное письмо, даже до подготовки MIME; Core-состояние не реактивируется | Cancel/resume/reschedule до/после MIME, обновлённый −24h deadline, старые HTTP повторы не сбрасывают sent/failed |
-| SMTP DATA accept → Notifications sent, HTTP 202 → Core forwarded | Нет ложного SMTP-успеха по ACK HTTP; отсутствие общей транзакции SMTP/DB остаётся | Настоящий TCP proxy теряет DATA-ответ после Mailpit accept; retry использует тот же MIME |
-| Ограниченный retry/backoff, 5xx сразу failed, временные ошибки pending | Недоступность SMTP не теряет строки; crash расходует заранее сохранённую попытку. После лимита требуется оператор | Бюджет, последняя прерванная попытка, реальные 4xx/5xx/disconnect/timeout, отсутствие DB-сессии в SMTP |
-| CLI retry одного failed ID с --acknowledge-duplicate-risk | Оператор останавливает sender; ID/payload/MIME не меняются, sent/pending/invalid не оживляются; повтор команды не сбрасывает бюджет ещё раз | Функция retry + настоящий subprocess CLI: отказ без флага, успешный targeted retry, повтор отклонён |
-| Sanitized last_error/logging и hide_input_in_errors для Settings | SMTP response/exception text могут содержать адреса/секреты; не выводить их даже при ошибке startup-конфигурации | SMTP-ошибки с адресом/токеном, caplog и DB diagnostics; ошибочные настройки не показывают input |
-| MP_IGNORE_DUPLICATE_IDS=true и MP_QUIET=true | Подавление дубля по ID только в сохранённом Mailpit store; не exactly-once, не сравнение содержимого | После SMTP accept/lost response/restart в Mailpit одна копия; ограничения очистки/потери store описаны явно |
-| Отдельный test-mailpit tmpfs, обычные test DB роли | Никаких основных данных/volumes; реальный SMTP в PostgreSQL интеграционных тестах. Только infrastructure test target устанавливает Notifications runtime lock через build context | Все три последовательных набора, bootstrap/изоляция/права, полные локальные CI-проверки |
+Prepare alone uses NOWAIT.55P03 from NOWAIT or lock_timeout is skipped only after transaction rollback, preserving attempts/deadline/payload/prepared_at/error; other DB failures propagate. Every new candidate has a new session. Cursor is not durable ownership, lease or blacklist; restart rediscovers pending. Tests cover A/B ordered messages, blocked prefixes beyond page size, outbox update timeout, rollback/unlocked event and division-by-zero propagation. No participant FIFO/API/schema change; network backoff still means no global strict delivery order after failures.
 
-Новые сущности, Redis, Kafka, Celery, распределённые leases, DB-триггеры неизменности, отменяющий HTTP-протокол и новые API-маршруты не добавлены. Полный контракт/риски и ручной retry: [docs/SMTP_DELIVERY.md](docs/SMTP_DELIVERY.md). После исчерпания бюджета автоматической гарантии eventual delivery нет: требуется вмешательство. Exactly-once SMTP не обещается.
+## SMTP:2026-10-23T09:59:38+05:00
 
+Clean starting HEADc4215d3 (`add reliable async notification delivery`). The user authorized local Mailpit SMTP without adding UI/SSE then. One separate notifications-sender uses aiosmtplib5.1.3, not a second lifespan sender. Persist MIME and attempt/backoff before network; render/load are distinct freeze boundaries without another migration.
 
-## Канонизация IDNA и идентичность email — 2026-10-23
+SMTP sendmail receives saved bytes/envelope; Date/Message-ID/From/To survive retry/settings/time changes. A configured local_hostname avoids synchronous getfqdn. Four plain-text templates put description only in body and explain historical state. Core remains readiness/freshness authority; even cancellation after Core freeze but before MIME cannot retract acceptance or reactivate Core state.
 
-Контрольная отметка `2026-10-23T15:51:52+05:00`. Пользователь подтвердил ошибки faß→fass и разные регистрации Unicode/Punycode; разрешил исправление и новую миграцию с предварительной проверкой коллизий. Перед работой дерево чистое, HEAD 57aab8b. Основная установка проверена READ ONLY: 0 регистраций/коллизий; upgrade к ней не применялся.
+DATA accept marks Notifications sent; HTTP202 marks only Core forwarded. Retry is bounded, permanent5xx fail, temporary errors remain pending; crash consumes a persisted attempt. Explicit failed-ID CLI requires duplicate-risk acknowledgement and keeps all evidence; invalid/sent/pending are not reset. Safe categories/settings validation avoid leaking SMTP responses/recipients/tokens. Mailpit duplicate suppression/quiet/current-store limits and test-mailpit tmpfs were explicit. Real TCP proxy loses DATA response after actual accept and verifies identical MIME/current-store one-copy recovery. No broker, leases, immutable DB trigger or cancellation HTTP protocol was added; exhaustion requires intervention, not a promise of eventual delivery.
 
-| Решение | Причина / компромисс | Проверка |
-|---|---|---|
-| email-validator 2.3.0 ascii_email, без SMTPUTF8/DNS, прежний lowercase | Python IDNA2003 codec терял ß; Unicode и A-label должны давать один ASCII-адрес. Не casefold, точки/+суффиксы сохраняются | faß→xn--fa-hia, fass отдельно; ASCII/IDN/регистр/повторы и 2 API-процесса |
-| Одна canonical_email функция в каждом независимом сервисе | Core использует до lookup и в ORM; Notifications — в renderer/проверке envelope. Нет общей бизнес-библиотеки/межбазового доступа | Кросс-сервисный тест шести эталонов; реальная SMTP RCPT без SMTPUTF8 |
-| HTTP DTO/payload не канонизируются повторно при приёме | Legacy JSON должен оставаться прежним для commit-before-ACK/retry; нельзя превратить потерянный ответ в конфликт | Старый Unicode payload сохраняется, новый MIME/RCPT ASCII; frozen MIME не пересериализуется |
-| В каждом retry сравнивать canonical To с canonical payload | Старый MIME с fass при payload faß отправит не тому домену. Не исправлять frozen bytes | Unsafe → failed/нет SMTP/следующий sent; manual retry отклонён, JSON/MIME/attempts/срок сохранены |
-| Non-ASCII frozen From/To отклоняются, ASCII-регистр допустим | Не ремонтировать сохранённый envelope и не включать SMTPUTF8. Message-ID сравнивается с учётом регистронезависимого ASCII-домена, но его байты не меняются | Legacy ASCII с uppercase From/To/Message-ID domain остаётся неизменным |
-| Read-only email_audit CLI + новая 0004 с повторным аудитом под ACCESS EXCLUSIVE | Сначала диагностировать, затем мигрировать стабильный набор; коллизии учитывают cancelled и event scope. При проблеме abort до первого UPDATE | Guard collision/invalid с полным rollback; IDs-only диагностика; audit не меняет строки |
-| UPDATE только registrations.email, ASCII CHECK, прежний UNIQUE | Сохраняются 3/24 колонки, ID/билеты/токены/FIFO/версии; ни outbox, ни Notifications не мигрируют | Миграция заполненной БД, snapshots всех остальных полей/outbox, raw Unicode SQL отклонён |
-| Downgrade снимает только ASCII CHECK, не деканонизирует строки | Исходное Unicode/Punycode написание не хранится; угадывать его нельзя. Для полного возврата нужен backup | upgrade/downgrade/upgrade/check на PostgreSQL, безопасный abort при коллизии |
-| Alembic engine hide_parameters=True | Не показывать email в bind-параметрах неожиданной ошибки миграции; прежние revision-файлы не редактируются | Ruff/Mypy/миграционные тесты; git diff старых revisions пуст |
+## Email canonicalization:2026-10-23T15:51:52+05:00
 
-Core остаётся источником бизнес-истины; FIFO, READ COMMITTED/event-lock, билеты, токены, HTTP JSON v1 и две границы фиксации не меняются. Уже доставленное неверное письмо отозвать нельзя; sent автоматически не пересылается. Основная установка не обновлена; перед реальным upgrade нужен backup/audit и остановка старых writers. [Политика и команды](docs/EMAIL_CANONICALIZATION.md).
+Clean starting HEAD57aab8b. User confirmed faß->fass and distinct Unicode/Punycode registration defects, approved a new audited migration. A read-only main preflight saw0registrations/0collisions; no main upgrade occurred.
 
-## Диагностика конфигурации без секретов — 2026-10-23
+Use email-validator2.3.0 ascii_email, no SMTPUTF8/DNS, prior lowercase policy, no casefold, preserve dots/+suffixes. Small independent helpers plus cross-service reference tests replace IDNA2003. Core normalizes before lookup/ORM; accepted HTTP DTO is not rewritten. On every retry compare canonical frozen To with canonical payload; wrong fass/IDNA or non-ASCII frozen envelope fails without SMTP, preserves evidence and lets the next valid job run. Correct legacy ASCII casing/Message-ID bytes remain unchanged.
 
-Контрольная отметка `2026-10-23T16:07:17+05:00`. Существующие изменения IDNA сохранены; текущая задача не меняет бизнес-правила, данные или схему.
+Read-only IDs-only audit and0004 repeat checks under event/registration ACCESS EXCLUSIVE, including cancelled rows/event scope. Any invalid/collision aborts before UPDATE, no merge/delete. Update email and ASCII CHECK only, retain3/24columns, UNIQUE, tickets/tokens/FIFO/versions/outbox. Downgrade removes ASCII CHECK but cannot recover original spelling; exact restoration needs backup. Alembic hide_parameters protects SQL errors. Sent messages cannot be retracted; main update requires backup/audit and stopping old writers. [Policy](docs/EMAIL_CANONICALIZATION.md).
 
-- Core использует `hide_input_in_errors=True`, как Notifications: текст и repr ValidationError не показывают исходные значения. Сохраняются имя поля, причина и код ошибки; startup завершается с ошибкой, исключения не подавляются.
-- DSN и токены исключены из repr Settings обоих сервисов. В Core также исключены адрес отправителя и Notifications URL, который может содержать credentials; у Notifications адрес и public URL уже были скрыты. Типы PostgresDsn/SecretStr и доступ к значениям для соединений/авторизации остаются прежними.
-- Notifications Alembic engine получает hide_parameters=True, как Core и оба runtime engine. Старые revision-файлы и миграционные операции не меняются.
-- Проверяется фактический stderr дочерних процессов Uvicorn factory, worker, operator CLI и Alembic каждого сервиса с вымышленными секретами и невалидной конфигурацией, до любых сетевых соединений. Health caplog проверяет реальные обработчики ошибки БД. Дополнительного общего catch/слоя логирования нет.
-- hide_input_in_errors защищает форматированный текст, а repr=False — представление модели. Они не очищают model_dump/errors()/json(); такие структуры не логируются. Системы, автоматически собирающие locals/env, требуют отдельной настройки и не входят в обычный startup traceback приложения.
+## Safe configuration diagnostics:2026-10-23T16:07:17+05:00
 
-## Финальная сверка backend перед frontend — 2026-10-23
+Preserve prior IDNA changes; no business/schema/data mutation. Both Settings hide input in formatted ValidationError and DSN/token/sensitive URLs in repr, retaining field/cause and nonzero startup. Notifications Alembic also hides bind parameters. Subprocess Uvicorn/worker/operator/Alembic tests use fictitious secrets before network; health caplog checks actual handlers. No global exception suppression/logging framework. model_dump/errors()/json() and external env/locals collectors are not sanitized and must not be logged.
 
-Контрольная отметка `2026-10-23T16:30:50+05:00`. Исходный PDF повторно прочитан: общие требования (стр. 1–2) и весь кейс №9 (стр. 9), SHA-256 прежний 3b7934746efef38066c6164c68df93ee6a0175c7ac7af8472372537a609539d7. Старые записи выше — история решений, не текущий список недоделок.
+## Backend readiness before UI:2026-10-23T16:30:50+05:00
 
-- Удалены неиспользуемые smtp_host/smtp_port/smtp_from из Core Settings и SMTP_HOST/PORT/FROM из x-backend environment Compose. Поиск всех обращений показал только объявления и устаревшие repr assertions; реальная SMTP-доставка использует только Notifications Settings. Её SMTP-настройки/Compose/.env.example остаются. Core конфигурационный тест проверяет оставшийся безопасный relay_timeout; защита DSN/токенов сохранена.
-- Актуальные миграции: Core 0004_canonical_email (24 поля), Notifications 0001_notification_jobs (7 полей). Здесь новых миграций нет; 0001–0003 Core/Notifications revision-файлы не меняются. Read-only preflight и отказ при IDNA-коллизиях остаются обязательными при обновлении существующего набора.
-- Исправлены текущие архитектурные утверждения: SMTP реализован, работают один Core relay + один Notifications sender, HTTP202 → forwarded; sent означает SMTP accept в Notifications (Core legacy sent сохраняется). Разные границы неизменности payload/MIME и риск SMTP-дубликата не меняются.
-- PDF требует результат регистрации/FIFO/билетов/почты/однократного чекина/live и работу двух клиентов. Core+Notifications, SSE, management tokens/resume, версии, IDNA и Mailpit — наши дополнительные согласованные решения; эссе из 10 предложений — отдельное указание пользователя. PDF не требует именно микросервисы или транспорт SSE.
-- Успешная проверка backend не закрывает C06/C07/C15/G11: отсутствуют пользовательские экраны, SSE endpoint и приёмка двух браузеров. Сейчас frontend не изменяется. Сравнения технологий в §12 архитектуры сохранены как исходный анализ; последующий Core+Notifications приоритетен.
-- Регрессии проверяются не только чтением: в disposable копиях внутри контейнеров возвращены старые дефекты. Core trim/lower-only выявлен 3 падениями, Notifications IDNA2003 — 2; раскрытие repr/input — 5 Core и 4 Notifications. Это ожидаемые отрицательные контроли, не отключённые тесты: рабочие файлы не менялись, основной полный набор должен проходить.
+PDF pages1–2/9 reread; SHA2563b7934746efef38066c6164c68df93ee6a0175c7ac7af8472372537a609539d7unchanged. Remove unused Core smtp_host/port/from and Compose declarations after reference audit; real SMTP belongs to Notifications. Current-at-that-time heads0004/0001,24/7columns. Prepared boundaries, forwarded-versus-sent and duplicate risk unchanged. PDF requires outcomes/two clients, not microservices/SSE/private tokens/resume/IDNA or the user essay.
 
-Проверка к `2026-10-23T16:39:52+05:00`: 331 обычный Pytest passed/0 skipped, все Ruff/format/Mypy, обе миграционные CLI round-trip/check, штатный Compose startup, полный API smoke и исходные CI HTTP/SMTP fault-сценарии успешны. Runtime — Core 24 поля/head0004, Notifications 7/head0001, 13 accepted/sent frozen MIME, нет failed. Временные tmpfs-контейнеры удалены без volumes. Это подтверждение backend-сценариев, а не закрытие UI/live/PDF целиком.
+UI/SSE/two-browser acceptance were still **historically pending at this stage**. Negative controls restored old defects only in disposable copies: Core trim/lower3failures, Notifications IDNA2003two, repr/input5Core/fourNotifications. They proved sensitivity, not disabled tests. By2026-10-23T16:39:52+05:00,331Pytest/0skips, all static/type/migration/Compose/API/HTTP/SMTP-fault checks passed;13accepted/sent MIME,failed0. This was backend evidence, not complete PDF/UI handover.
 
-## Frontend и минимальный SSE — 2026-10-23
+## Frontend/SSE:2026-10-23T21:46:26+05:00
 
-Контрольная отметка `2026-10-23T21:46:26+05:00`; начало этапа зафиксировано в DEVELOPMENT_LOG `19:55:44+05:00`, HEAD bef709c, дерево было чистым. Пользователь явно разрешил реализацию экранов/SSE и самостоятельные обычные технические/визуальные решения.
+Start recorded19:55:44+05:00, clean HEADbef709c. User authorized actual screens/SSE and routine design decisions. React/TypeScript/Vite used small history/Link routing, API client/hooks and reusable action lifecycle, no large UI kit/state manager. Warm paper/graphite/blue, real descriptions/dates/capacity only, local fonts, responsive390–1440 and accessible labels/focus/status.
 
-| Решение | Причина / предел |
-|---|---|
-| React/TypeScript/Vite, небольшой Link/history router, hooks/data и api/client | Несколько статических маршрутов без дополнительного runtime-router/UI kit/state manager. HTTP/ошибки вне визуальных компонентов; useAction повторно используется пятью формами |
-| Тёплая афиша, графит, один глубокий синий, Georgia/system fonts, строки дат | Реальные description/starts_at/capacity/счётчики; нет придуманных названий/фото/локаций/категорий и внешних шрифтов. Responsive 390–1440, фокус/labels/status/alert, без декоративных эффектов |
-| Public GET /api/events/{id}/stream + EventSource | Те же публичные данные, что EventView, плюс server_time. В URL нет секретов; private GET/mutations — только Authorization. Не нужны cookies, новый auth или брокер |
-| Полный stats snapshot каждую секунду | Одновременно heartbeat и восстановление после разрыва. Private участие может измениться без изменения итоговых счётчиков между ticks: страница перечитывает своё состояние. Session/transaction закрыты перед yield/ожиданием. Нагрузка O(число открытых streams), fan-out пока не нужен |
-| GET /api/organizer/access использует существующий organizer_access | Проверить ключ без пробного события/побочной бизнес-операции. Не новая учётная запись/сессия; публичные/приватные бизнес-контракты сохранены |
-| Токены только в памяти вкладки; consume fragment до render и при hashchange/popstate | Нет localStorage/sessionStorage/history state/query. Смена ссылки remount private page без прежних данных. После reload — снова ссылка из первого письма/ключ. Потерянный management token по email не восстанавливается |
-| Никакого optimistic success | Нейтральный ответ после HTTP202 не гарантирует место или email-доставку; билет только из private GET. Cancel/resume с participation_no; date с schedule_version; HTTP409 вызывает перечитывание, без автоматического повторения мутации |
-| Explicit Asia/Almaty UTC+5 для отображения и datetime-local | Значение формы конвертируется с +05:00, не через timezone компьютера. Все ограничения начала/чекина остаются на сервере |
-| Close/reconnect/watchdog | Native retry2s, offline закрывает поток/показывает последний снимок, online/focus открывает новый; watchdog8s для молчаливого соединения. Cleanup закрывает Source/listeners/timer/abort. Медленный private GET не отменяется каждым tick, mutation блокирует старые ответы generation |
-| Vitest + Playwright + Prettier только dev | HTTP/time/privacy unit tests; настоящие Chrome контексты/Core/Notifications/Mailpit E2E. Network failure намеренно имитируется abort/offline, успешные бизнес-операции не подменяются. Trace/video выключены; assertions не печатают приватные URL |
-| compose.browser-test.yaml + scripts/browser-test.sh | Отдельное имя/образы, .env.example, tmpfs DB/Mailpit, запрет основного project name. Сохраняется опубликованный frontend порт, sender останавливается до смены PUBLIC_APP_URL и запускается после определения адреса; неизменяемые MIME не переписываются |
+Public EventSource carries only public EventView/server_time; private/organizer requests use Authorization. Full snapshots provide initial/reconnect recovery; the original per-client read was later superseded by shared producers. Organizer access verifies an existing key without side effects. Tokens are consumed before render/hashchange/popstate, remain memory-only and require reentry after reload. No optimistic success;409 rereads real generation/date. Almaty input is explicit+05, not device timezone. Offline closes streams, online/focus reconnect, watchdog8s, retry2s; slow private reads are not cancelled by every tick.
 
-Бизнес-сервисы, FIFO/event-lock, схема/миграции, relay/Notifications/SMTP не изменены. Проверки текущего этапа не означают завершённую сдачу: остаются пользовательское ревью, fresh clone/GitHub/согласованные коммиты, точная модель и эссе. Автоматическая браузерная проверка — Chrome, полноценный cross-browser/a11y аудит ещё не проводился. SMTP exactly-once не добавлялся. Текущий CI выполняет frontend format/unit/types/build; Playwright пока отдельный локальный прогон.
+Vitest/Playwright/Prettier are dev-only; E2E uses actual Core/Notifications/Mailpit, intentional network abort/offline, no fake successful operations or secret traces/video. Guarded tmpfs overlay preserves actual public origin and port on rebuild; sender starts after origin resolution, frozen MIME remains unchanged. Cross-browser/a11y audit and final user acceptance remain open; Playwright was local-only then, later added to CI.
 
-Дополнение `2026-10-23T21:55:05+05:00`: инспекция реальных логов нашла AnyIO level cancellation, прерывающую asyncpg connection termination при disconnect посреди SSE SQL. Исправление — shield только короткого read_event целиком с Session cleanup; **ни один cancel scope не пересекает yield**. Не перехватывать/не заглушать CancelledError глобально и не отключать SQLAlchemy logging. Вне короткой DB-фазы отмена действует штатно; existing SQL/connect timeouts сохраняются. Новый PostgreSQL regression отменяет клиента с реальным открытым соединением/pg_sleep и требует завершённый снимок, checkedout=0 и отсутствие connection-termination error. Без исправления тест воспроизводит дефект. [AnyIO: cancellation, shielding и finalization](https://anyio.readthedocs.io/en/stable/cancellation.html). AnyIO уже был pinned через FastAPI/Starlette/httpx, явно объявлен импортируемой прямой зависимостью, новые версии/сервисы не добавлены.
+At2026-10-23T21:55:05+05:00, real logs exposed AnyIO level cancellation interrupting asyncpg cleanup on disconnect. Shield only the short read_event/session cleanup; no cancel scope crosses yield, no global CancelledError/log suppression. Existing pinned AnyIO became explicit, without version/hash changes. PostgreSQL cancellation regression fails without the fix and checks completed read/checkedout0/no termination error. [AnyIO shielding](https://anyio.readthedocs.io/en/stable/cancellation.html).
 
+## Reliability/load:2026-10-24T14:29:20+05:00
 
-## Надёжность/нагрузка — 2026-10-24T14:29:20+05:00
+Server-time/performance anchors disable time-sensitive actions while unknown/offline; initial transient REST can recover via real SSE,404 stays visible. Browser±365day tests leave OS clocks unchanged.
 
-- Серверное время SSE + performance.now вместо Date.now для пяти действий. Неизвестное/потерянное время — disabled до свежего серверного снимка; backend остаётся окончательной проверкой. Временный отказ первоначального REST может восстановиться через настоящий SSE;404 не скрывается. Clock E2E ±365 дней не меняют часы ОС.
-- Минимальный mutex полной итерации relay/sender — session advisory lock в каждой своей БД, AUTOCOMMIT connection + ownership watchdog. Это один активный обработчик, без leases/Redis/Celery/новых таблиц. Cleanup не возвращает locked connection в pool. Утрата DB-сессии отменяет in-flight операцию, но не может отозвать уже принятый SMTP DATA; failover/partition оставляют неопределённость/риск повтора. [PostgreSQL advisory locks](https://www.postgresql.org/docs/17/explicit-locking.html#ADVISORY-LOCKS).
-- Queue checks/failed UUID/oldest_due_seconds и heartbeat реального цикла — минимальная диагностика без monitoring stack/PII. Ручной retry только failed с прежними ID/данными; SMTP риск явно подтверждается оператором. Сводка не выдаётся за полный возраст задания с первой постановки.
-- SSE coalescing на мероприятие/процесс, bounded latest-state queue1, cleanup при последнем слушателе, fresh reconnect. Не shared cache бизнес-решений. Private GET на изменения/reconnect +10s fallback, чтобы не переносить прежний SQL/клиент/секунду в другой endpoint; редкое private-only изменение может отображаться до10s. Общий broker/NOTIFY пока не нужен.
-- Pagination default20/max100 с offset — минимум для небольшого сервиса. API list контракт явно меняется на {items,next_offset}, обновлены оба React списка/тесты. Snapshot между страницами не обещается при переносах. Индексы требуют0005 без изменения24 полей.
-- Перенос — три typed parameter SQL на outbox внутри прежнего event-lock/transaction вместо per-row ORM запросов. Сохранены freeze/dedup/reminder/поколения, добавлены statement budget и mid-operation rollback. Дополнительные абстракции repository/broker не вводятся.
-- Nginx shared zones: registration30r/s+burst1000 по remote_addr и общий SSE cap2000 без маленького cap на NAT; backend отдельно ограничивает subscribers/process. Incoming XFF перезаписывается, API не опубликован. Это локальные budgets одного ingress, не распределённая anti-bot система. [Nginx limit_req](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html), [limit_conn](https://nginx.org/en/docs/http/ngx_http_limit_conn_module.html).
-- CI Playwright использует Node24 и установленный Chromium/системные библиотеки, настоящие tmpfs PostgreSQL/Mailpit, readiness и always cleanup. PUBLIC_APP_URL переносится через GITHUB_ENV между restart sender. Trace/video не сохраняются. [Playwright CI](https://playwright.dev/docs/ci).
-- До/после: отдельный git archive исходного HEAD e64a564 и текущий рабочий код, одинаковые probes/свежие tmpfs БД, последовательные замеры без функционального тестирования параллельно. Первый exploratory baseline не используется как контролируемое сравнение. Результаты фиксируются после завершения, не прогнозируются.
+Minimum singleton is session advisory ownership in each DB on an AUTOCOMMIT connection with watchdog/cleanup. Lost session cancels in-flight work but cannot retract accepted SMTP DATA; no leases/Redis/Celery/tables or fencing claim. Queue/failed-ID/overdue/heartbeat diagnostics and explicit failed retry avoid exposing PII. [PostgreSQL advisory locks](https://www.postgresql.org/docs/17/explicit-locking.html#ADVISORY-LOCKS).
 
-Дополнение `2026-10-24T18:12:14+05:00`: окончательные контролируемые замеры и EXPLAIN сохранены в [docs/LOAD_TESTING.md](docs/LOAD_TESTING.md) и JSON. Не объявляем ускорение регистрации/очереди: p95 и drain имеют разброс, один after drain48.606s при400 письмах; причина выброса не доказана. Улучшение общего SSE-снимка и переноса подтверждено локально, production capacity не установлена. Новая регрессия0005 проверяет сохранность полного содержимого трёх заполненных таблиц при downgrade/upgrade; старые миграции сохранены. Удалённый CI не запускался, проверены локальные команды и настоящий Chrome, Linux-container browser step остаётся к проверке GitHub Actions после разрешения push.
+SSE coalesces per event/process into latest-state queue1 with last-listener cleanup. Private state reads on changes/reconnect plus10s fallback rather than every heartbeat; rare private-only changes can display late. Pagination20/max100/offset is intentionally minimal, not a snapshot across moves.0005 indexes retain24columns. Three typed set-based SQL statements replace per-row reschedule loops while preserving freeze/dedup/generation/reminder and rollback.
 
-## Исправления аудита — 2026-10-24T19:44:27+05:00
+Nginx30r/s/burst1000per real IP and shared SSE2000 accommodate NAT; API has its own process budget and incoming XFF is overwritten. These are local budgets, not distributed anti-bot/production capacity. [limit_req](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html), [limit_conn](https://nginx.org/en/docs/http/ngx_http_limit_conn_module.html). CI adds real tmpfs PG/Mailpit/Node24/Chromium/readiness/always-cleanup; actual PUBLIC_APP_URL persists between steps. [Playwright CI](https://playwright.dev/docs/ci).
 
-1. LiveHub завершал producer после SQL-ошибки, но сохранял topic/latest/завершённый ready до cleanup последнего HTTP-подписчика. Reconnect в этом окне переиспользовал мёртвый topic. Теперь producer в finally удаляет только собственный topic из registry до пробуждения reconnect; cleanup старого подписчика не удаляет новый. Начальная ошибка и ошибка после первого снимка проверены реальной SQL-ошибкой PostgreSQL, reconnect намеренно выполняется до старого close.
-2. Старый load probe проверял лишь confirmed<=capacity и сумму счётчиков по числу202, поэтому200×500/частичный успех могли пройти. Итоговая проверка требовала только активных SSE без проверки payload/deadlocks/очереди. Теперь обязательны200×202,10/190,600pending outbox конкретного события, нулевые дубли/deadlocks, все живые SSE с повторными свежими валидными снимками, соответствующими подтверждённому HTTP-состоянию. Ошибки дочерних задач не теряются. Z/+00:00 сравниваются как один момент. Искусственные ошибки покрыты регрессиями; прежние результаты остаются историческими замерами со слабее проверенным критерием успеха.
-3. E2E страницы доверял номеру страницы, который меняется до получения строк. Теперь Promise-барьер удерживает настоящий запрос, тест проверяет загрузку, затем ждёт HTTP200 и точные href строк из ответа. Проверяются вперёд/назад в публичном и рабочем списках. Sleep и увеличение таймаутов не используются.
-4. Availability отдельно использовал Date.now, хотя кнопки уже использовали серверное время. Теперь компонент принимает только serverNow либо null; неизвестное время показывает нейтральный статус. Список получает дополнительный server_time из EventPage (RequestClock), отсчитывает время через performance.now; detail использует прежний SSE clock. Серверные бизнес-правила/модель БД не меняются. Component и Chrome-регрессии проверяют±год, переход через начало, неизвестное время/offline/reconnect.
+At2026-10-24T18:12:14+05:00, controlled baseline/current measurements/EXPLAIN and populated0005 preservation were recorded. Registration/queue speedup is not claimed: one400-email drain48.606s, variable p95, unexplained outlier. Shared SSE/reschedule improvement is local, not production SLA. The initial exploratory baseline is not controlled comparison. Remote workflow/Linux browser step remained unrun pending allowed publication.
+
+## Audit fixes:2026-10-24T19:44:27+05:00
+
+1. A failed LiveHub producer retained ready/latest until HTTP cleanup, so reconnect attached to a dead topic. Retire only that producer's registry identity before reconnect; late old cleanup cannot remove a new topic. Real SQL failures reproduce initial and post-snapshot cases, deliberately reconnecting before old close.
+2. Old probe checks allowed200×500/partial registration, unchecked SSE/deadlocks/outbox. Require200×202,10/190,600pending for this event, no duplicates/deadlocks, all active fresh valid expected-state snapshots and collected child errors; UTCZ/+00equivalent. Old raw runs remain historical weaker checks, not retroactively strict proof.
+3. Pagination E2E trusted a page number before rows loaded. Hold a real request with a Promise, assert loading, then wait for200and exact response hrefs in both directions/public/organizer. No sleeps or raised timeouts.
+4. Availability still used Date.now. Pass serverNow/null; unknown neutral. Lists get server_time in EventPage and advance with performance; detail uses SSE. Component/Chrome tests cover±year/start/offline/reconnect without changing business/schema rules.
+
+
+## English submission review: 2026-10-26T03:11:57+05:00
+
+The user requested a full English project and reviewer-oriented cleanup. Translate current human-facing UI/API messages, newly prepared email templates, tests and documentation while preserving routes, error codes, business transactions, schema and stored data. Existing immutable MIME/payload remain byte-identical; intentional Unicode fixtures stay as regression data. The original assignment PDF remains unchanged. Historical decisions/logs keep their recorded times and material outcomes in an explicitly condensed English edition; their original verbatim wording remains at the existing linked Git revision.
+
+Remove only the proven-unused empty root main.py, useAction.clear, duplicate LoadState branch and explicitly allowed local caches/build reports. Keep service modules, .env, IDE files, dependency directories/locks, migration sources, tests, SQL/probes and raw load measurements. Page-specific readiness plus font completion must precede E2E overflow assertions/screenshots. Tests use isolated tmpfs projects and PostgreSQL/Mailpit; no migration is needed, no main data/volumes are changed, and commit/push/deployment remain unauthorized. Final pass counts and exact local checks are recorded in DEVELOPMENT_LOG.md; Mailpit remains an emulator and SMTP remains at-least-once with an ambiguous-accept duplicate risk.

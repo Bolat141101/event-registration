@@ -25,9 +25,9 @@ export function OrganizerLogin({ unlock }: { unlock: (key: string) => void }) {
   const action = useLogin();
   return (
     <main className="container narrow">
-      <p className="eyebrow">Рабочее пространство</p>
-      <h1>Организатору</h1>
-      <p className="intro">Мероприятия, участники и отметки на входе.</p>
+      <p className="eyebrow">Workspace</p>
+      <h1>Organizer</h1>
+      <p className="intro">Manage events, participants and check-in.</p>
       <form
         className="access-form"
         onSubmit={(event) => {
@@ -40,7 +40,7 @@ export function OrganizerLogin({ unlock }: { unlock: (key: string) => void }) {
           });
         }}
       >
-        <label htmlFor="organizer-key">Ключ организатора</label>
+        <label htmlFor="organizer-key">Organizer key</label>
         <input
           id="organizer-key"
           name="organizer-key"
@@ -54,11 +54,11 @@ export function OrganizerLogin({ unlock }: { unlock: (key: string) => void }) {
           aria-describedby="access-help"
         />
         <p id="access-help" className="muted">
-          Доступ сохранится в этой вкладке до перезагрузки.
+          Access stays in this tab until you reload it.
         </p>
         <Notice error>{action.error?.message}</Notice>
         <button className="primary" disabled={action.busy}>
-          {action.busy ? 'Проверяем…' : 'Открыть рабочее пространство'}
+          {action.busy ? 'Checking…' : 'Open workspace'}
         </button>
       </form>
     </main>
@@ -81,8 +81,8 @@ function CreateForm({ organizerKey }: { organizerKey: string }) {
           });
       }}
     >
-      <h2>Новое мероприятие</h2>
-      <label htmlFor="description">Описание</label>
+      <h2>New event</h2>
+      <label htmlFor="description">Description</label>
       <textarea
         id="description"
         required
@@ -92,7 +92,7 @@ function CreateForm({ organizerKey }: { organizerKey: string }) {
         onChange={(event) => setDescription(event.target.value)}
         disabled={action.busy}
       />
-      <label htmlFor="starts-at">Дата и время · Алматы (UTC+5)</label>
+      <label htmlFor="starts-at">Date and time · Almaty (UTC+5)</label>
       <input
         id="starts-at"
         type="datetime-local"
@@ -102,7 +102,7 @@ function CreateForm({ organizerKey }: { organizerKey: string }) {
         onChange={(event) => setStarts(event.target.value)}
         disabled={action.busy}
       />
-      <label htmlFor="capacity">Лимит мест</label>
+      <label htmlFor="capacity">Capacity</label>
       <input
         id="capacity"
         type="number"
@@ -117,7 +117,7 @@ function CreateForm({ organizerKey }: { organizerKey: string }) {
       />
       <Notice error>{action.error?.message}</Notice>
       <button className="primary" disabled={action.busy}>
-        {action.busy ? 'Создаём…' : 'Создать мероприятие'}
+        {action.busy ? 'Creating…' : 'Create event'}
       </button>
     </form>
   );
@@ -128,18 +128,18 @@ export function OrganizerHome({ organizerKey }: { organizerKey: string }) {
     <main className="container">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Рабочее пространство</p>
-          <h1>Мероприятия</h1>
+          <p className="eyebrow">Workspace</p>
+          <h1>Events</h1>
         </div>
         <p className="timezone">{timezone}</p>
       </div>
       <div className="workspace">
         <section>
-          <h2 className="section-label">Все мероприятия</h2>
+          <h2 className="section-label">All events</h2>
           {!list.data || list.error ? (
             <LoadState error={list.error} retry={list.retry} />
           ) : list.data.length === 0 ? (
-            <p className="muted">Пока пусто. Создайте первое мероприятие.</p>
+            <p className="muted">No events yet. Create your first event.</p>
           ) : (
             <div className="organizer-list">
               {list.data.map((event) => (
@@ -150,15 +150,14 @@ export function OrganizerHome({ organizerKey }: { organizerKey: string }) {
                       <Link href={`/organizer/events/${event.id}`}>{event.description}</Link>
                     </h3>
                     <p className="muted">
-                      {time(event.starts_at)} · {event.confirmed} из {event.capacity}{' '}
-                      зарегистрировано
+                      {time(event.starts_at)} · {event.confirmed} of {event.capacity} registered
                     </p>
                   </div>
                   <Link
                     href={`/organizer/events/${event.id}`}
-                    aria-label={`Управлять: ${event.description}`}
+                    aria-label={`Manage: ${event.description}`}
                   >
-                    Открыть
+                    Open
                   </Link>
                 </article>
               ))}
@@ -200,17 +199,15 @@ function ScheduleForm({
         void action.run(value).then((result) => {
           if (result) {
             saved(result);
-            setNotice('Дата сохранена.');
+            setNotice('Date saved.');
           } else refresh();
         });
       }}
     >
-      <h2>Дата мероприятия</h2>
-      {serverNow === null && (
-        <Notice>Уточняем время сервера. Восстановите связь для изменения даты.</Notice>
-      )}
-      <p className="muted">При переносе участникам будет отправлено письмо.</p>
-      <label htmlFor="new-date">Новая дата и время · Алматы (UTC+5)</label>
+      <h2>Event date</h2>
+      {serverNow === null && <Notice>Checking server time. Reconnect to change the date.</Notice>}
+      <p className="muted">Participants will receive an email about the new date.</p>
+      <label htmlFor="new-date">New date and time · Almaty (UTC+5)</label>
       <div className="inline-form">
         <input
           id="new-date"
@@ -222,10 +219,10 @@ function ScheduleForm({
           disabled={action.busy || serverNow === null || started}
         />
         <button className="secondary" disabled={action.busy || serverNow === null || started}>
-          {action.busy ? 'Сохраняем…' : 'Сохранить дату'}
+          {action.busy ? 'Saving…' : 'Save date'}
         </button>
       </div>
-      {started && <p className="muted">Мероприятие началось. Перенос недоступен.</p>}
+      {started && <p className="muted">The event has started. Rescheduling is unavailable.</p>}
       <Notice error>{action.error?.message}</Notice>
       <Notice>{notice}</Notice>
     </form>
@@ -247,26 +244,26 @@ function CheckinForm({
   const started = serverNow !== null && Date.parse(event.starts_at) <= serverNow;
   return (
     <section className="checkin-panel">
-      <p className="eyebrow">Вход на мероприятие</p>
-      <h2>Проверить билет</h2>
+      <p className="eyebrow">Event entrance</p>
+      <h2>Check a ticket</h2>
       {serverNow === null && (
-        <Notice>Уточняем время сервера. Восстановите связь для чекина.</Notice>
+        <Notice>Checking server time. Reconnect to check in participants.</Notice>
       )}
-      <p>Введите код с билета участника.</p>
+      <p>Enter the code from the participant ticket.</p>
       <form
         onSubmit={(submit) => {
           submit.preventDefault();
           setResult('');
           void action.run(code.trim()).then((value) => {
             if (value) {
-              setResult('Участник отмечен. Можно проверять следующий билет.');
+              setResult('Participant checked in. You can check the next ticket.');
               setCode('');
             }
             requestAnimationFrame(() => input.current?.focus());
           });
         }}
       >
-        <label htmlFor="ticket-code">Код билета</label>
+        <label htmlFor="ticket-code">Ticket code</label>
         <input
           ref={input}
           id="ticket-code"
@@ -286,12 +283,12 @@ function CheckinForm({
           aria-describedby="checkin-result"
         />
         <button className="primary" disabled={action.busy || !started}>
-          {action.busy ? 'Проверяем…' : 'Отметить участника'}
+          {action.busy ? 'Checking…' : 'Check in participant'}
         </button>
       </form>
       {!started && (
         <p className="muted">
-          Чекин откроется {fullDate(event.starts_at)} в {time(event.starts_at)} · Алматы.
+          Check-in opens on {fullDate(event.starts_at)} at {time(event.starts_at)} · Almaty.
         </p>
       )}
       <div id="checkin-result" className="checkin-result">
@@ -321,21 +318,21 @@ export function OrganizerEvent({
   return (
     <main className="container">
       <Link className="back-link" href="/organizer">
-        ← Все мероприятия
+        ← All events
       </Link>
       <div className="work-heading">
         <div>
-          <p className="eyebrow">{checkin ? 'Чекин' : 'Управление мероприятием'}</p>
+          <p className="eyebrow">{checkin ? 'Check-in' : 'Manage event'}</p>
           <h1>{event.description}</h1>
           <p className="muted">
-            {fullDate(event.starts_at)} · {time(event.starts_at)} · Алматы (UTC+5)
+            {fullDate(event.starts_at)} · {time(event.starts_at)} · Almaty (UTC+5)
           </p>
         </div>
         <Link
           className="secondary button-link"
           href={checkin ? `/organizer/events/${id}` : `/organizer/events/${id}/check-in`}
         >
-          {checkin ? 'К управлению' : 'Открыть чекин'}
+          {checkin ? 'Manage event' : 'Open check-in'}
         </Link>
       </div>
       <Stats event={event} />
@@ -352,10 +349,10 @@ export function OrganizerEvent({
             serverNow={live.serverNow}
           />
           <aside className="public-link">
-            <h2>Страница для участников</h2>
-            <p>Описание, регистрация и информация о местах.</p>
+            <h2>Participant page</h2>
+            <p>Description, registration and availability.</p>
             <Link href={`/events/${id}`}>
-              Открыть страницу <span aria-hidden="true">↗</span>
+              Open page <span aria-hidden="true">↗</span>
             </Link>
           </aside>
         </div>

@@ -1,865 +1,480 @@
-# Журнал разработки
-
-Часовой пояс: `Asia/Almaty`, `UTC+05:00`. Источник контрольных меток: инструмент часов, возвращающий UTC; для отображения добавлено 5 часов. Это фактические моменты наблюдения/фиксации результатов, а не выдуманные точные длительности команд.
-
-Журнал начат в текущем этапе анализа. Предыдущие сообщения пользователя и первоначальный план существуют в чате, но их точное время здесь не восстановлено. Записи ниже не утверждают, что предыдущая работа началась в какое-либо придуманное время.
-
-| Время Алматы | Фактически выполнено / наблюдение | Результат |
-|---|---|---|
-| 2026-10-19T22:29:41+05:00 | Получена первая контрольная метка, начато исследование workspace и инструкции PDF | В docs найден один исходный PDF; объявлено применение навыка PDF |
-| 2026-10-19T22:30:34+05:00 | К этой отметке проверено начальное состояние Git, извлечены текст PDF и отдельно полные страницы 1, 2, 9; начаты отрисовка и поиск технических первоисточников | В репозитории нет коммитов; PDF уже staged пользователем/до текущей работы, main.py уже существует пустым и untracked. PyMuPDF недоступен; pypdf успешно прочитал 13 страниц. Поиск по всем страницам не обнаружил требования эссе. Вопрос Mailpi/Mailpit отправлен пользователю |
-| 2026-10-19T22:31:07+05:00 | Визуально проверены отрисованные страницы 1, 2 и 9; сверены официальные сведения о блокировках PostgreSQL и настройках Mailpit; вычислен SHA-256 PDF | Общие требования и весь кейс №9 читаемы; установлено наличие настройки Mailpit подавления дублей Message-ID. Исходный PDF не изменён |
-| 2026-10-19T22:33:04+05:00 | Создан REQUIREMENTS.md: матрица PDF/условий пользователя, варианты реализации и проверки, неоднозначности A01–A09; получен ответ пользователя о Mailpit | Mailpit подтверждён. Функциональные требования пока имеют только план реализации и приёмки |
-| 2026-10-19T22:37:22+05:00 | Создан ARCHITECTURE.md: компоненты, структура, три таблицы, транзакции, FIFO, чекин, outbox/напоминания, SSE, API, тесты и риски; снята контрольная отметка для журнала решений | REQUIREMENTS.md — 91 строка, ARCHITECTURE.md — 308 строк на этой проверке. Git показывает новые документы, прежний staged PDF и прежний main.py. `git diff --check` не сообщил ошибок, но untracked-файлы эта команда сама не проверяет |
-| 2026-10-19T22:39:18+05:00 | Созданы DECISIONS.md и DEVELOPMENT_LOG.md; выполнена отдельная проверка четырёх Markdown-файлов и состояния Git | Проверены пробелы/переводы строк и парность блоков кода; 18 G, 16 C, 7 U и 9 A имеют последовательные уникальные ID; D01–D10 присутствуют. SHA-256 PDF прежний, main.py пустой, коммитов нет. Проверки приложения не запускались |
-| 2026-10-19T22:39:58+05:00 | Уточнена реактивация напоминания при повторном вступлении и неизменяемость уже подготовленного письма; повторно проверены форматирование и локальные ссылки всех четырёх документов | Проверки прошли. Запрос открытия ARCHITECTURE.md в панели Codex принят со статусом queued. Этап передаётся пользователю на согласование; реализация не начата |
-| 2026-10-20T08:42:03+05:00 | Начат пересмотр архитектуры по новым замечаниям; прочитаны документы и состояние Git | Рабочая ветка теперь main с upstream origin/main; уже существует коммит ecc4273 `first_commit`. Это изменение между этапами, агент его не создавал; main.py по-прежнему untracked |
-| 2026-10-20T08:43:20+05:00 | Проверены первичные документы PostgreSQL, Celery/Redis, WHATWG SSE/WebSocket, RabbitMQ и Mailpit | Уточнены гарантии изоляции, redelivery/ack и отсутствие автоматической exactly-once доставки email; собраны ссылки для сравнений |
-| 2026-10-20T08:47:15+05:00 | Переработаны схема/алгоритм outbox, доступ по токену, эндпоинты, объяснение ACID/изоляции и SSE; выполнен поиск устаревших терминов | Убраны leases/processing и поддержка нескольких отправителей; Message-ID вычисляемый, prepared_at сохранён. Публичный email-запрос больше не может восстанавливать cancelled; resume требует токен и номер участия |
-| 2026-10-20T08:49:34+05:00 | Добавлены сравнение трёх очередей, путь будущей миграции, границы расширения и таблица компромиссов; обновлена матрица требований | REQUIREMENTS.md дополнен U08–U10 и согласован с новой схемой. Получена отметка для новой редакции журнала решений; функциональные тесты не выполнялись |
-| 2026-10-20T08:51:18+05:00 | Обновлены DECISIONS.md и журнал; выполнены автоматические проверки документов и состояния Git | Проверены форматирование, таблицы, локальные ссылки, последовательные ID G18/C16/U10/A9, разделы архитектуры 1–14, 12 полей outbox и отсутствие удалённых полей/маршрутов в актуальном контракте. Изменены только четыре Markdown-файла; HEAD ecc4273, индекс, PDF и пустой main.py неизменны. `git diff --check` прошёл |
-
-## Проверенные первоисточники
-
-- Локальный PDF: `docs/Задания Agentic Developer (2).pdf`; страницы 1–2 и 9 прочитаны полностью; визуальная сверка этих трёх страниц завершена.
-- [PostgreSQL — Explicit Locking](https://www.postgresql.org/docs/current/explicit-locking.html).
-- [PostgreSQL — Transaction Isolation](https://www.postgresql.org/docs/current/transaction-iso.html).
-- [Mailpit — Runtime options](https://mailpit.axllent.org/docs/configuration/runtime-options/).
-- [Mailpit — Importing messages](https://mailpit.axllent.org/docs/integration/importing/).
-
-Веб-источники использованы для проверки технических свойств предложений. Это не runtime-зависимости будущего приложения и не дополнительные требования задания.
-
-## Технические детали этого этапа
-
-- Прочитаны инструкции навыков PDF и openai-docs; для описания фактического инструмента использован доступный контекст, точная версия модели не выдумана. Детали — DECISIONS.md.
-- Использован bundled Python с pypdf и Poppler pdftoppm. Неудачная попытка импорта pymupdf не означала недоступность PDF; запасной способ чтения сработал без установки пакетов.
-- Временные изображения для визуальной проверки находятся вне проекта: `/tmp/maddevs-requirements-review/`. Они не являются сдаваемыми артефактами и не добавляются в Git.
-- Поиск не нашёл применимых AGENTS.md в workspace и проверенных родительских каталогах.
-- Исходный PDF, пустой main.py и индекс Git сохранены. Команды git add/commit/push не выполнялись; приложение, Compose, миграции и тесты не создавались.
-
-## Состояние после CI-этапа (историческая запись)
-
-Этап: настройка GitHub Actions CI для уже существующего инфраструктурного каркаса. Добавлен workflow, проверки локально выполнены. Backend/frontend, миграции, Mailpit, README и базовые тесты присутствуют; бизнес-функции регистрации/FIFO/чекина/доставки/SSE ещё не реализованы. Исторические записи выше описывают состояние на момент их создания. HEAD ecc4273 сохранён; агент не создавал коммитов и не выполнял push. Запуск CI на GitHub пока не подтверждён.
-
-Следующим действием на момент CI-этапа было показать результаты и дождаться подтверждения пользователя. Запрет push на этом этапе сохранён; позднее пользователь отдельно разрешил упрощение схемы, см. новые записи ниже.
-
-## Проверка CI от 2026-10-20
-
-Метки ниже получены инструментом часов в текущем этапе и преобразованы из UTC в Asia/Almaty. Пропущенные в текущем файле записи предыдущих этапов не восстанавливаются задним числом.
-
-| Время Алматы | Фактически выполнено | Результат |
-|---|---|---|
-| 2026-10-20T15:09:43+05:00 | Прочитаны manifests, Compose, Dockerfile, тесты и состояние Git; начато изучение официального синтаксиса GitHub Actions | Workflow ещё не существовал. Обнаружена сохранённая пользователем публикация порта DB 5433; принято сохранить её значение по умолчанию |
-| 2026-10-20T15:12:08+05:00 | Создан .github/workflows/ci.yml; POSTGRES_PORT добавлен в Compose/.env.example; начата локальная валидация | Триггеры push/PR main, один job, существующие образы/зависимости, изолированный CI-проект, health и cleanup |
-| 2026-10-20T15:13:09+05:00 | Actionlint 1.7.12 завершился без ошибок; проверены фильтры/permissions и bash-синтаксис всех run-блоков; начат локальный запуск точных команд/environment workflow | YAML прочитан стандартным Ruby Psych после обнаружения отсутствия PyYAML; зависимости приложения не менялись. Скрипт воспроизведения создан только в /tmp |
-| 2026-10-20T15:14:14+05:00 | Полный локальный CI-прогон завершился кодом 0; проверена поддержка Linux amd64 закреплёнными Docker digest | Ruff/format и Mypy прошли; 30 tests passed за 0.54s; Alembic round-trip и check прошли; frontend image собран; Compose поднялся с новыми volumes; health вернул точный ожидаемый JSON. Все контейнеры/volumes CI-проекта удалены |
-| 2026-10-20T15:15:40+05:00 | README и журнал решений обновлены; выполнена итоговая проверка diff/Git и изоляции окружений | `git diff --check` прошёл, HEAD ecc4273 и индекс неизменны. CI-контейнеров/volumes нет, обычные сервисы работают и health даёт 200. Git push и запуск GitHub Actions не выполнялись; следующий этап не начат |
-
-## Упрощение схемы до 24 колонок — 2026-10-21
-
-Метки текущего этапа получены по UTC-часам и переведены в Asia/Almaty (`+05:00`). Это новые записи фактических действий, без восстановления пропущенной истории.
-
-| Время Алматы | Фактически выполнено | Результат |
-|---|---|---|
-| 2026-10-21T21:23:51+05:00 | Начата проверка файлов, зависимостей, истории Git и области реализации | HEAD eb34b8c, исходное дерево чистое. Реализованы инфраструктура и health, бизнес-сервисы отсутствуют |
-| 2026-10-21T21:26:32+05:00 | Проверены работающие Compose-сервисы и число записей в трёх таблицах | Все прикладные таблицы пусты; обычные сервисы работают. Схема до изменения содержит 34 поля |
-| 2026-10-21T21:31:06+05:00 | К этой отметке изменены модели, добавлены 0002 и helper очереди; расширены тесты; пройдены локальные Ruff/format/Mypy; начата сборка контейнеров | Модели 5+9+10. Первоначальные замечания Ruff по длине строк и вложенным with исправлены, проверки повторены успешно. 0001 не редактировалась; подготовлены проверки сохранности данных и конкурентного MAX |
-| 2026-10-21T21:31:30+05:00 | Обновлены ARCHITECTURE/REQUIREMENTS/README; запущен полный PostgreSQL Pytest и frontend build без кэша; сохранён pre-upgrade дамп | Дамп /tmp/MadDevs-before-0002-20261021.dump вне Git. Результаты ещё выполняющихся проверок на этой отметке не объявлены успешными |
-| 2026-10-21T21:32:46+05:00 | К этой отметке получены результаты PostgreSQL Pytest, новой миграции и frontend build; начаты запуск основного окружения и контейнерные проверки | 43 passed, 0 skipped; npm run build выполнял tsc --noEmit и Vite без кэша. Ruff/format контейнера прошли; Mypy на этой отметке ещё выполнялся |
-| 2026-10-21T21:34:07+05:00 | Получены результаты Mypy, запуска Compose, SQL-подсчёта и HTTP smoke; выполнен check основной БД | Mypy: 13 файлов без ошибок; db/api/frontend/Mailpit healthy, worker запущен, migrate exit 0; схема 0002, 5+9+10=24; health/OpenAPI/frontend HTTP 200, JSON health ok/ready; основная БД соответствует моделям |
-| 2026-10-21T21:35:28+05:00 | Завершён отдельный CLI Alembic downgrade base → upgrade head → check на выделенной тестовой БД; проверены diff, логи и отсутствие изменений 0001 | Все команды exit 0, check: No new upgrade operations detected. Populated downgrade отдельно проверен тестом: явный отказ без частичных DDL-изменений. Неисправленных ошибок проверок нет |
-
-### Выполненные команды и результаты этого этапа
-
-Все команды из корня репозитория, кроме локальных Ruff/Mypy (`backend/`). Полный Pytest выполнялся внутри test-контейнера с TEST_DATABASE_URL на настоящем PostgreSQL 17; интеграционные проверки не пропускались.
-
-| Проверка | Реально выполненная команда | Результат |
-|---|---|---|
-| Ruff lint | `docker compose --profile test run --rm --no-deps test ruff check .` | PASS |
-| Ruff format | `docker compose --profile test run --rm --no-deps test ruff format --check .` | PASS, 22 файла |
-| Mypy | `docker compose --profile test run --rm --no-deps test mypy app` | PASS, 13 файлов |
-| Pytest + upgrade/check | `docker compose --profile test run --rm --build test` | PASS, 43 tests за 1.45s (35 integration + 8 unit), без skip/xfail; сервисная команда: `alembic upgrade head && pytest && alembic check` |
-| Alembic CLI downgrade | `docker compose --profile test run --rm --no-deps test alembic downgrade base` | PASS на пустой тестовой БД, обе ревизии сняты |
-| Alembic CLI upgrade | `docker compose --profile test run --rm --no-deps test alembic upgrade head` | PASS с base до 0002 |
-| Alembic CLI check | `docker compose --profile test run --rm --no-deps test alembic check` | PASS, No new upgrade operations detected |
-| Alembic основной БД | `docker compose exec -T api alembic check` | PASS |
-| Compose config | `docker compose config --quiet` | PASS |
-| Сборка образов | `docker compose --profile test build api test frontend` | PASS |
-| TypeScript/Vite | `docker compose build --no-cache frontend` | PASS, фактически выполнены npm ci и npm run build → tsc --noEmit + vite build |
-| Полный запуск | `docker compose up --build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend` | PASS, миграция exit 0, доступные healthchecks зелёные; worker только probe, собственного healthcheck нет |
-| Health HTTP | `curl --fail --silent --show-error --max-time 10 --write-out '\nHTTP %{http_code}\n' http://127.0.0.1:8080/api/health` | PASS, 200, {"status":"ok","database":"ready"} |
-| OpenAPI HTTP | `curl --fail --silent --show-error --max-time 10 --output /tmp/MadDevs-schema-openapi.json --write-out 'OpenAPI HTTP %{http_code}\n' http://127.0.0.1:8080/api/openapi.json` | PASS, 200; JSON дополнительно проверен Python: единственный бизнес-маршрут пока GET /api/health |
-| Frontend HTTP | `curl --fail --silent --show-error --max-time 10 --output /tmp/MadDevs-schema-index.html --write-out 'Frontend HTTP %{http_code}\n' http://127.0.0.1:8080/` | PASS, 200, проверено название в HTML |
-
-SQL выполнен через `docker compose exec -T db` → psql в основной БД:
-
-```sql
-SELECT COALESCE(table_name, 'TOTAL') AS table_name, count(*) AS columns
-FROM information_schema.columns
-WHERE table_schema = 'public'
-  AND table_name IN ('events', 'registrations', 'email_outbox')
-GROUP BY ROLLUP(table_name)
-ORDER BY table_name;
--- TOTAL=24, email_outbox=10, events=5, registrations=9
-SELECT version_num FROM alembic_version;
--- 0002_simplify_schema
-```
-
-Тесты очереди проверяют ожидание реального event-lock через pg_blocking_pids и чтение MAX после чужого commit, FIFO-сортировку, повторное использование хвоста/пустой очереди и rollback. Тесты схемы проверяют нормализацию/повтор email, cancelled без даты, совместимость хранения нового участия, уникальность билета, допустимость checked_in_at только у confirmed, уникальность логического outbox и sent только после подготовки. Миграционный тест сохраняет данные всех трёх статусов, токен/билет/чекин, обе версии и подготовленный payload/ID/dedup_key/attempts/ошибку.
-
-Это не тесты отсутствующих HTTP-сервисов или доставки SMTP: последнее место, автоматическое продвижение при отмене, авторизованный resume, однократный чекин, реальные email/напоминания/переносы и SSE ещё не реализованы. Их дальнейшая разработка и приёмка остаются отдельными этапами. GitHub CI удалённо не запускался; commit/push не выполнялись.
-
-### Состояние после этого этапа
-
-Контрольная отметка: `2026-10-21T21:36:40+05:00`. В основной PostgreSQL проверены все имена/nullable колонок: events=5, registrations=9, email_outbox=10. Схема соответствует варианту 3. Доступны обновлённые Compose-сервисы, health/OpenAPI/frontend, ORM-нормализация и транзакционная функция номера очереди; полнофункциональная регистрация и обработка outbox ещё впереди. Тестовая БД после проверок остановлена, основные volumes сохранены. `git diff --check` и проверка пустого staged diff прошли; HEAD eb34b8c сохранён, 0001 неизменна. Добавлены три новых пока untracked файла: waitlist.py, 0002_simplify_schema.py, test_waitlist.py; обычный `git diff --stat` их не учитывает. Ошибок в выполненных проверках не осталось. Следующий этап не начат; commit/push не выполнены. После отчёта ожидается решение пользователя.
-
-## Backend-сервисы, HTTP и транзакционная постановка outbox — 2026-10-22
-
-Метки получены по текущим UTC-часам и переведены в Asia/Almaty. Вложения пользователя прочитаны до изменений. На этом этапе SMTP/SSE/UI не реализуются.
-
-| Время Алматы | Фактически выполнено | Результат |
-|---|---|---|
-| 2026-10-22T11:10:42+05:00 | Прочитано приложенное задание, проверены git status/diff и необходимые модели/сервисы/контракты | Рабочее дерево и staged diff пусты; HEAD 2649399 refactor db. Предыдущая схема и helper очереди уже сохранены пользователем; бизнес-сервисов нет |
-| 2026-10-22T11:11:12+05:00 | Сверены API/доступ/напоминания с архитектурой и manifests | Схема 24 колонки достаточна; решено не менять миграции, использовать существующий MAX helper и один event-lock |
-| 2026-10-22T11:17:29+05:00 | К этой отметке созданы сервисы, постановка outbox, HTTP/доступ и обработчики ошибок; начата установка email-validator и локальные проверки | Первичные замечания Ruff — формат/неиспользуемые импорты; Mypy до завершения установки сообщил об отсутствующем email_validator. Проверки после установки повторены успешно |
-| 2026-10-22T11:21:19+05:00 | Локальные Ruff/Mypy прошли; запущен первый PostgreSQL прогон с сервисными тестами | Реальные конкурентные транзакции, без worker и SQLite; подготовлены rollback/time/version/outbox проверки |
-| 2026-10-22T11:24:41+05:00 | Получен успешный первый прогон 67 тестов; добавлены HTTP и дополнительные конкурентные/временные проверки, запущен полный прогон | Все существующие тесты сохранены. Новые сценарии вызывают сервисы/API; prepared состояния задаются только как начальные фикстуры будущего sender |
-| 2026-10-22T11:27:00+05:00 | Обновлены README/ARCHITECTURE/REQUIREMENTS; получен результат расширенного прогона | 108 passed, 1 failed из 109: тест отката переноса сравнивал счётчик confirmed со снимком до регистрации. HTTP/доступ/реальный lock timeout прошли |
-| 2026-10-22T11:27:56+05:00 | Исправлен исходный снимок в тесте отката; fault injection усилен сбоем после flush outbox; повторён запуск всех тестов | Ruff/format/Mypy прошли. Проверены Compose config и отсутствие существующих volumes под новым именем smoke-проекта; никаких пользовательских volumes не удалено |
-| 2026-10-22T11:31:23+05:00 | Получен повторный полный результат, создано и запущено отдельное Compose-окружение с новыми volumes | 109 passed за 3.87s, 0 skipped. Изолированный проект event-registration-business-check-20261022, динамические host-порты, чистая PostgreSQL, migrate exit 0 |
-| 2026-10-22T11:32:48+05:00 | Завершён первый настоящий HTTP smoke через frontend proxy; контейнерные Ruff/format/Mypy прошли; отдельный CLI downgrade завершён, upgrade запущен | Создание/регистрация/FIFO/resume/перенос/чекин и коды 200/201/202/401/404/409/422 подтверждены. Итоговые счётчики 1/1/1, схема 24, по одному reminder на запись. SMTP не вызывается |
-| 2026-10-22T11:35:22+05:00 | CLI upgrade и check завершены, обычное окружение обновлено с сохранением данных; при ревью замечена утечка наличия email после начала | Команды exit 0. Различие 202 существующего / 409 нового адреса признано несогласованным с нейтральным ответом; принято убрать различие кодов, сохранив запрет вставки |
-| 2026-10-22T11:36:03+05:00 | Исправлен публичный ответ после начала, добавлен HTTP regression test, уточнены временные тесты и документация; запущен полный повтор | Новая поздняя регистрация не создаётся, ответ такой же нейтральный 202; Ruff/format/Mypy локально прошли. На этой отметке новый Pytest ещё выполнялся |
-| 2026-10-22T11:38:24+05:00 | Получен окончательный полный прогон после исправления приватности; повторный HTTP smoke запущен на свежей БД | 110 passed за 4.13s, без skip/xfail; Alembic check прошёл |
-| 2026-10-22T11:40:20+05:00 | Повторный HTTP smoke завершился успешно; Ruff/format/Mypy контейнера прошли; проверен обычный proxy после обновления | Выявлен отдельный HTTP 502 через Nginx при здоровом API, Alembic check основной БД прошёл. Тестовая БД остановлена; smoke-volumes удалялись только у созданного текущим этапом проекта |
-| 2026-10-22T11:41:09+05:00 | Причина 502 подтверждена логом: соединение со старым IP upstream; добавлен динамический Docker DNS resolver в Nginx | Изменение только nginx.conf, без пользовательских экранов. Прочитаны официальные Nginx proxy_pass/resolver; запущена пересборка и проверка |
-| 2026-10-22T11:42:36+05:00 | Пересборка/запуск обычного frontend завершились; nginx -t и HTTP health прошли; создано свежее изолированное окружение для регрессии proxy | Синтаксис OK, health 200 ok/ready. Backend после 110 passing tests не менялся; повторяются затронутые HTTP/Compose проверки |
-| 2026-10-22T11:45:05+05:00 | Проверено восстановление proxy после фактической смены IP API без пересоздания frontend; повторный полный HTTP smoke с новым Nginx запущен; основная схема проверена read-only | API IP в изолированном проекте изменился с 192.168.16.4 на 192.168.16.5, frontend container ID прежний, health 200. Основная БД: events=5, registrations=9, email_outbox=10, revision=0002 |
-
-### Команды и окончательные результаты backend-этапа
-
-Команды запускались из корня репозитория. Для контейнерных тестов TEST_DATABASE_URL указывает на PostgreSQL event_registration_test. В root test-db worker не запускался, обычный worker подключён к другой БД. Ни одна основная прикладная таблица не очищалась. Удалялись только новые volumes изолированного smoke-проекта, созданные текущим этапом.
-
-| Проверка | Реально выполненная команда | Результат |
-|---|---|---|
-| Ruff lint | `docker compose --profile test run --rm --no-deps test ruff check .` | PASS |
-| Ruff format | `docker compose --profile test run --rm --no-deps test ruff format --check .` | PASS, 40 Python-файлов |
-| Mypy | `docker compose --profile test run --rm --no-deps test mypy app` | PASS, 25 файлов |
-| Полный Pytest + upgrade/check | `docker compose --profile test run --rm --build test` | PASS, 110 tests за 4.13s: 102 integration + 8 unit; 0 skip/xfail. Внутри: alembic upgrade head && pytest && alembic check |
-| Отдельный CLI downgrade | `docker compose --profile test run --rm --no-deps test alembic downgrade base` | PASS на пустой отдельной тестовой БД |
-| Отдельный CLI upgrade | `docker compose --profile test run --rm --no-deps test alembic upgrade head` | PASS, обе прежние миграции |
-| Отдельный CLI check | `docker compose --profile test run --rm --no-deps test alembic check` | PASS, No new upgrade operations detected |
-| Check основной БД | `docker compose exec -T api alembic check` | PASS |
-| Compose config | `docker compose config --quiet` | PASS |
-| Сборка и старт обычного окружения | `docker compose up --build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend` | PASS; после обнаруженного stale-IP proxy исправлен и повторно собран frontend |
-| Применение исправленного proxy | `docker compose up --build -d --wait --wait-timeout 120 frontend` | PASS |
-| Nginx config | `docker compose exec -T frontend nginx -t` | PASS |
-| Обычный health, read-only | `curl --fail --silent --show-error http://127.0.0.1:8080/api/health` | Первоначально FAIL 502, причина исправлена; повтор PASS, ok/ready |
-| Изолированный build/start | `COMPOSE_PROJECT_NAME=event-registration-business-check-20261022 COMPOSE_ENV_FILES=.env.example POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0 docker compose up --build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend` | PASS с чистыми volumes; frontend TS/Vite слои переиспользованы из кэша, собственный новый typecheck в этом этапе не заявляется |
-| Настоящий HTTP smoke новых API | `COMPOSE_PROJECT_NAME=event-registration-business-check-20261022 COMPOSE_ENV_FILES=.env.example POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0 docker compose exec -T -e ALLOW_ISOLATED_SMOKE=yes api python - < /tmp/MadDevs-backend-smoke.py` | PASS всех новых маршрутов и ожидаемых 200/201/202/401/404/409/422; counter=1/1/1, один reminder на запись, два rescheduled для двух активных записей; SMTP не используется |
-| Регрессия proxy после API recreate | `COMPOSE_PROJECT_NAME=event-registration-business-check-20261022 COMPOSE_ENV_FILES=.env.example POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0 backend/.venv/bin/python /tmp/MadDevs-proxy-recovery.py` | PASS, реальная смена IP, frontend не перезапускался, health снова 200. Скрипт внутри выполняет compose up --no-build --no-deps -d --force-recreate --wait --wait-timeout 60 api worker |
-| Проверка diff/миграций | `git diff --check` и `git diff --exit-code HEAD -- backend/migrations backend/app/db/models.py backend/app/db/waitlist.py` | PASS, миграции/схема/helper не изменены |
-
-110 тестов включают 37 HTTP-проверок и 30 проверок бизнес-сервисов, плюс все 43 существовавших теста. Реальная конкуренция проверена отдельными транзакциями, ожидающими event-lock в PostgreSQL: последнее место, один нормализованный email, отмена против нового участника, две отмены, два resume, два чекина и чтение текущего времени после ожидания блокировки. Проверены FIFO A/B/C без worker, версии участия/переносов, rollback после записи outbox, prepared pending/sent без переписывания, late reminder, hash/доступ/валидация/отсутствие секретов в ответах и логах. Неподготовленный failed notice обновляется без автоматического retry.
-
-Схема по-прежнему 24 колонки, users не добавлена, новые миграции не потребовались. SMTP/MIME/retries отправки/SSE/полноценные экраны не реализованы намеренно по границам этапа. Нет полноценной авторизации/нескольких организаторов, recovery потерянного токена и отдельного idempotency key создания события. При неопределённом результате COMMIT нельзя гарантировать откат. GitHub Actions удалённо не запускался; команды CI выполнены локально в контейнерах. Коммитов/push нет.
-
-### Состояние после backend-этапа
-
-Контрольная отметка `2026-10-22T11:47:42+05:00`: все 110 тестов и требуемые проверки завершены успешно, исправленный proxy прошёл повторный полный HTTP smoke. Неисправленных ошибок выполненных проверок нет. Основные db/api/frontend/Mailpit healthy, worker запущен (собственного healthcheck нет), migrate exit 0. Выделенная test-db остановлена; все созданные этим этапом smoke-контейнеры/volumes удалены, пользовательские volumes сохранены. Схема/миграции/существующий MAX-helper не изменены. git diff --check и пустой staged diff проверены, HEAD 2649399 сохранён. Добавлены 18 новых пока untracked файлов; обычный git diff --stat их не учитывает. Коммитов/push нет, следующий этап не начат. SMTP/SSE/UI остаются отдельно согласуемой работой.
-
-## Исправление граничных дат и U+0000 — 2026-10-22
-
-| Время Алматы | Фактически выполнено | Результат |
-|---|---|---|
-| 2026-10-22T12:18:34+05:00 | Проверены status/diff и существующий незакоммиченный backend-этап; прочитаны UTC-преобразование, схемы ввода, API-тесты и README | Существующие изменения сохранены. Причины ошибок: OverflowError в astimezone и отсутствие проверки NUL в описании |
-| 2026-10-22T12:21:04+05:00 | Добавлены UTCDateTime с AfterValidator(as_utc), преобразование OverflowError в ValueError и проверка U+0000 в API/сервисе; добавлены семь API-регрессий и исправлен README | Верхняя/нижняя границы для create и schedule отклоняются до сервиса; ошибочный перенос не меняет событие/версию/outbox. Замечание Ruff по длине строки исправлено форматтером; Ruff/format/Mypy повторены успешно |
-| 2026-10-22T12:21:54+05:00 | Получен результат полного прогона на отдельной PostgreSQL с актуальными app/tests в read-only mount; проверены diff и неизменность моделей/миграций | 117 passed за 4.38s, без skip/xfail; Alembic check: No new upgrade operations detected. Основная БД и volumes не затронуты |
-
-Команды Ruff/Mypy выполнены из backend: `.venv/bin/ruff check .` — PASS; `.venv/bin/ruff format --check .` — PASS (40 файлов); `.venv/bin/mypy app` — PASS (25 файлов).
-
-Полный PostgreSQL-прогон из корня: `docker compose --profile test run --rm --volume /Users/billcarter/Documents/MadDevs/backend/app:/app/app:ro --volume /Users/billcarter/Documents/MadDevs/backend/tests:/app/tests:ro test`. Использован существующий test-образ с прежними зависимостями и текущими исходниками; внутри выполнены `alembic upgrade head && pytest && alembic check`. Тесты работают только с event_registration_test; тестовая БД затем останавливается, команды удаления volumes не используются.
-
-README больше не относит регистрацию/FIFO/чекин к будущим задачам, описывает реализованные services/outbox и оставшиеся SMTP/SSE/экраны. API возвращает validation_error/422 для `0001-01-01T00:00:00+01:00`, `9999-12-31T23:59:59-01:00` и описаний с NUL; бизнес-сервис не вызывается. Схема/миграции/зависимости не менялись, commit/push не выполнялись.
-
-## Переход Core API на AsyncSession/asyncpg — 2026-10-22
-
-Время ниже — контрольные отметки реально выполненной работы, Asia/Almaty (UTC+05:00). История предыдущих этапов сохранена. Начальное рабочее дерево чистое, HEAD `9a5694a`, staged diff пуст. Прямое разрешение пользователя: перевести существующий Core API на async, сохранить бизнес-операции и контракты; прежние revisions и данные не менять.
-
-| Время Алматы | Фактически выполнено к отметке | Результат |
-|---|---|---|
-| 2026-10-22T16:06:25+05:00 | Начало работы: проверка git status/diff/log, актуального кода, миграций и тестов | Исходный этап 2 сохранён пользователем в 9a5694a. Перед правками дополнительно сохранены OpenAPI и SHA256 моделей/двух revision-файлов для сравнения |
-| 2026-10-22T16:18:31+05:00 | DB-операции, endpoints, dependency и worker переведены на asyncpg/AsyncSession; адаптированы фикстуры, конкурентные тесты и Alembic env; локальные Ruff/format/Mypy прошли | Первое сравнение OpenAPI совпало. Создан отдельный Compose-проект event-registration-async-check-20261022; test-db в tmpfs, случайный loopback-порт 55012. Основная БД не используется |
-| 2026-10-22T16:20:48+05:00 | Выполнен первый полный PostgreSQL Pytest; исправлены ошибки адаптации тестов и запущен повтор | Первый результат: 122 passed, 2 failed и teardown error из-за неawaited callback; наблюдатель pg_stat_activity также читал закэшированный снимок. Добавлены await operation() и pg_stat_clear_snapshot в наблюдателе, проверки не ослаблены |
-| 2026-10-22T16:23:34+05:00 | Повторный локальный полный Pytest и check прошли; завершены контейнерные Ruff/format/Mypy, свежий TypeScript/Vite build и запуск изолированного полного стека | 124 passed за 8.13s, без skip/xfail; No new upgrade operations detected. Чистая БД отдельного приложения, migrate exit 0; api/db/frontend/Mailpit healthy, worker запущен |
-| 2026-10-22T16:24:25+05:00 | Завершён штатный контейнерный CI-прогон и настоящий HTTP smoke через frontend; OpenAPI и SHA256 сравнены повторно | 124 passed за 6.19s, без skip/xfail. Все маршруты этапа 2 и 200/201/202/401/404/409/422 подтверждены. OpenAPI идентичен; models.py и revision-файлы побайтно прежние |
-| 2026-10-22T16:26:03+05:00 | Явные CLI downgrade base → upgrade head → current → check выполнены только в пустой *_test; PostgreSQL подтвердил 24 поля; проверены недоступность/восстановление изолированной БД и SIGTERM worker | head=0002_simplify_schema; events=5, registrations=9, email_outbox=10. Во время остановки БД health/events=503, затем health=200. Первая команда рестарта без POSTGRES_PORT=0 конфликтовала с занятым 5433; повтор с динамическим портом успешен. Основной контейнер/volume не затронут. Worker вывел Worker stopped, без принудительного kill |
-
-### Реализованные изменения
-
-- `backend/app/db/session.py`: create_async_engine + async_sessionmaker; READ COMMITTED, pool_pre_ping, hide_parameters и expire_on_commit=False сохранены. connect timeout=3s и server_settings lock_timeout=2s/statement_timeout=3s адаптированы к asyncpg.
-- `backend/app/api/{events,registrations,health,dependencies}.py`, `backend/app/main.py`: async endpoints, async session dependency, awaited readiness и закрытие engine в lifespan. API-схемы/маршруты/коды успешных операций не менялись.
-- `backend/app/services/{common,events,registrations,checkins}.py`, `backend/app/db/waitlist.py`, `backend/app/notifications/outbox.py`: явные await для SQL/flush/refresh и async transaction contexts. Event-first lock, отдельный MAX statement, FIFO-продвижение, idempotency/версии, токены/билеты, одно напоминание и неизменность prepared outbox сохранены. Helpers не делают собственный commit.
-- `backend/app/api/errors.py`: временные ошибки asyncpg, включая OSError/TimeoutError до SQLAlchemy wrapper, connection_invalidated и SQLSTATE недоступности, переводятся в прежний безопасный 503. SQL/параметры/секреты не логируются.
-- `backend/app/worker.py`: asyncio.Event и ожидание интервала/сигнала без threading.Event.wait; awaited DB readiness и dispose. Это всё ещё инфраструктурная проверка, не реализация доставки.
-- `backend/migrations/env.py`: AsyncEngine + официальный run_sync-адаптер Alembic; только в тестовом harness синхронные публичные Alembic commands запускаются через asyncio.to_thread, чтобы не вкладывать asyncio.run в AnyIO. SQL использует asyncpg. Новых migrations нет, файлы versions и модели не менялись.
-- `backend/pyproject.toml`, оба requirements lock, `backend/app/config.py`, `compose.yaml`: sqlalchemy[asyncio], asyncpg 0.32.0, DSN postgresql+asyncpg; psycopg/psycopg-binary убраны из зависимостей. Остальные закреплённые версии сохранены, greenlet остаётся необходимым адаптером SQLAlchemy.
-- `backend/tests/conftest.py`, integration fixtures/support и все integration tests: AnyIO/asyncio, AsyncEngine/AsyncSession, отдельная сессия каждой конкурентной задаче, функция-фикстура engine без передачи asyncpg-пула между event loop. В тестах миграций пул очищается после внешнего DDL.
-- Семь дополнительных проверок: отказ от sync DSN (1), чтение/health во время реального event-lock (1), OSError/TimeoutError API (2), отмена задачи с rollback регистрации+outbox и освобождением lock (1), ошибки соединения health (2). Все прежние 117 проверок сохранены; предупреждения остаются ошибками.
-- README/ARCHITECTURE/DECISIONS/docs/WORKER_EVOLUTION обновлены: текущая async-модель, смена DSN без пересоздания БД, адаптация Alembic, владение сессией и будущие границы worker. Исторические решения не переписаны задним числом.
-
-### Фактические команды и результаты
-
-Для контейнерных команд ниже общий префикс P: `docker compose --env-file .env.example -f compose.yaml -f /tmp/MadDevs-async-test-port.yaml -p event-registration-async-check-20261022 --profile test`. Временный override только публикует test-db как `127.0.0.1:0:5432` для локального Pytest. Он не меняет сервисы основного проекта. При запуске всего стека заданы `POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0`; основные volumes не используются. `P …` в таблице — сокращённая запись фактически выполненного полного префикса с аргументами. Первые lint/build команды выполнялись также без временного override, который к ним не относится.
-
-| Проверка | Реально выполненная команда | Итог |
-|---|---|---|
-| Ruff локально | из backend: `.venv/bin/ruff check .` | PASS |
-| Форматирование локально | из backend: `.venv/bin/ruff format --check .` | PASS, 40 файлов |
-| Mypy локально | из backend: `.venv/bin/mypy app` | PASS, 25 файлов |
-| Полный локальный PostgreSQL Pytest | из backend: `.venv/bin/pytest -q`; DATABASE_URL/TEST_DATABASE_URL указывали на выделенную event_registration_test через 127.0.0.1:55012, драйвер asyncpg | PASS, 124 за 8.13s; первый неуспешный прогон описан выше |
-| Локальный Alembic | из backend: `.venv/bin/alembic upgrade head`, `.venv/bin/alembic check` с тем же тестовым DSN | PASS |
-| Compose config | `docker compose --env-file .env.example -p event-registration-async-check-20261022 --profile test config --quiet` | PASS |
-| Backend/test/frontend images | `docker compose --env-file .env.example -p event-registration-async-check-20261022 --profile test build api test frontend`; затем актуальные api/test пересобраны | PASS; frontend первоначально использовал кэш, далее сборка выполнена заново отдельной командой |
-| Ruff/format/Mypy контейнера | `P run --rm --no-deps test ruff check .`; `P run --rm --no-deps test ruff format --check .`; `P run --rm --no-deps test mypy app` | PASS, включая повтор в окончательном test image |
-| Штатный CI database step | `P build test`, `P run --rm test`; внутри `alembic upgrade head && pytest && alembic check` | PASS, 124 за 6.19s, без skip/xfail |
-| Отдельный round-trip CLI | `P run --rm --no-deps test alembic downgrade base`; затем `alembic upgrade head`, `alembic current`, `alembic check` с тем же префиксом | PASS, head 0002; check без расхождений |
-| Свежие TypeScript/Vite | `docker build --target build -t event-registration-async-frontend-check:local frontend`; `docker run --rm --network none event-registration-async-frontend-check:local npm run build` | PASS: tsc --noEmit + Vite 8.3.4, 17 modules, built in 2.53s |
-| Чистая БД и полный Compose | `P up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend`; `P ps --all` | PASS, migrate=0, сервисы готовы; worker не имеет своего healthcheck |
-| HTTP health через proxy | `curl --fail --silent --show-error http://127.0.0.1:55015/api/health` | 200, ok/ready |
-| Настоящий HTTP Core smoke | `P exec -T -e ALLOW_ISOLATED_SMOKE=yes api python - < /tmp/MadDevs-async-smoke.py` | PASS, все имеющиеся бизнес-маршруты, FIFO/resume/перенос/checkin; счётчики 1/1/1, два reminder на две регистрации, два уведомления переноса; PostgreSQL снова подтвердил 24 поля |
-| Отказ и восстановление БД | `P stop db`, HTTP GET health/events через urllib, затем `P up --no-deps -d --wait --wait-timeout 60 db` с переменными динамических портов | PASS: 503/503 без секретов → 200 health; конфликт порта первой команды исправлен |
-| Остановка worker | `P stop worker`; `P logs --no-color --tail 12 worker` | PASS, INFO Worker stopped |
-| Неизменность контрактов/схемы | сравнение OpenAPI и SHA256 с сохранёнными до правок; `git diff --exit-code HEAD -- backend/migrations/versions backend/app/db/models.py` | PASS; без новых колонок/revisions |
-| Diff | `git diff --check`, `git status --short --branch`, `git diff --stat` | PASS; изменения не staged, commit/push отсутствуют |
-
-Все проверки выполнены локально; GitHub Actions удалённо не запускался. Существующий workflow не менялся: команды и сервисы прежние, DSN/dependency изменены в Compose/образах. Ошибки тестовой адаптации и команды рестарта исправлены, проверки не отключались. SMTP, MIME, отправочные retries, SSE и полноценный UI остаются будущими этапами; этот переход их не реализует. Async не увеличивает число одновременных мутаций одного события под event-lock и не устраняет неопределённость исхода при потере соединения в момент COMMIT.
-
-
-Контрольная отметка завершения проверок и уборки: `2026-10-22T16:28:28+05:00` (22 минуты 3 секунды от начальной отметки). Выполнен `P down --remove-orphans` **без --volumes**: временные контейнеры и сеть удалены, оба созданных проверкой volumes оставлены. Основные api/db/frontend/Mailpit остались healthy, прежний worker работает, исходная test-db осталась остановленной. Основное приложение не пересоздавалось, его данные и volumes не изменялись. Список прежних test-функций сопоставлен с HEAD: все сохранены, только название теста sync DSN заменено на asyncpg. На последней проверке неустранённых падений нет; рабочее дерево содержит изменения этого перехода, индекс пуст, HEAD 9a5694a сохранён. Git-коммитов и push нет.
-
-## Валидация ticket_code и HTTP-конкуренция двух процессов — 2026-10-22
-
-| Время Алматы | Фактически выполнено к отметке | Результат |
-|---|---|---|
-| 2026-10-22T17:10:29+05:00 | Проверены актуальные status/diff, схемы ввода, API-тесты, async-сервисы и фикстуры | Незакоммиченный async-переход сохранён. Перед правками записаны SHA256 services/db/migrations для контроля отсутствия изменений бизнес-логики |
-| 2026-10-22T17:14:02+05:00 | Добавлен валидатор CheckIn.ticket_code, три API-регрессии NUL; исправлена проверка результата HTTP-регистрации; добавлен test_api_processes.py | Код билета отклоняется до SQL; результат POST читается из PostgreSQL без business.join. Два spawned Uvicorn-процесса имеют разные PID, порты, lifespan, engines и пулы. Начат полный Pytest на отдельной PostgreSQL; первоначальная команда с неподдерживаемым Compose run --no-build не запускалась, флаг убран |
-| 2026-10-22T17:15:22+05:00 | Первый полный PostgreSQL-прогон и Alembic check прошли; доработан teardown всех дочерних процессов и сравнение билета API с БД; повтор запущен | 129 passed за 10.24s; Ruff/format/Mypy проходят. Проверки не отключались |
-| 2026-10-22T17:15:45+05:00 | Завершён повтор всего Pytest/Alembic после окончательных правок; сопоставлены SHA256 бизнес-кода и AST исправленного HTTP-теста | 129 passed за 9.81s, без skip/xfail; No new upgrade operations detected. Services, db и migrations не изменялись в этом этапе; в проверяемом HTTP-тесте нет вызова join |
-
-Изменения этого запроса:
-
-- `backend/app/api/schemas.py`, CheckIn.no_null_character: U+0000 в любом месте ticket_code вызывает ValueError входной схемы и прежний validation_error/HTTP 422. Другие допустимые коды и бизнес-правила чекина сохранены.
-- `backend/tests/integration/test_api.py`: после регистрационного POST выполняются только SELECT для проверки одной регистрации и двух outbox-записей ticket/reminder. Проверяются статус, номер участия, нормализованный email, ticket_code, dedup_key, pending-состояние и hash токена из первого payload. Последующие cancel/resume выполняются через API как раньше. Добавлены три запроса с NUL в начале/середине/всём коде; чекин уже доступен по времени, ответ 422 и сохранённое состояние проверяются на PostgreSQL.
-- Новый `backend/tests/integration/test_api_processes.py`: два настоящих HTTP API-процесса через multiprocessing spawn; никакого ASGITransport для конкурентных действий. Перед выпуском event-lock наблюдатель PostgreSQL с обновляемым статистическим снимком подтверждает две ожидающие транзакции. Для capacity=1 проверяются 202/202, ровно 1 confirmed + 1 waitlisted, один билет, FIFO-позиция 1 и четыре уникальных outbox-задания. Для одного билета проверяются 200/409, единственное сохранённое время, повторы 409 через оба процесса и счётчик checked_in=1. Подготовка участника для checkin выполняется до проверяемых HTTP-запросов; результат чекина не создаётся вспомогательными сервисами. В teardown завершаются оба процесса, принудительный kill считается ошибкой теста.
-- README дополнен фактически выполненной проверкой двух процессов. Новых зависимостей, миграций и инфраструктурных сервисов нет.
-
-Фактические проверки:
-
-| Команда | Результат |
-|---|---|
-| `backend/.venv/bin/ruff check backend` | PASS |
-| `backend/.venv/bin/ruff format --check backend` | PASS, 41 Python-файл |
-| `backend/.venv/bin/mypy --config-file backend/pyproject.toml backend/app` | PASS, 25 файлов |
-| `docker compose --env-file .env.example -p event-registration-async-check-20261022 --profile test run --rm --volume /Users/billcarter/Documents/MadDevs/backend/app:/app/app:ro --volume /Users/billcarter/Documents/MadDevs/backend/tests:/app/tests:ro test` | PASS: alembic upgrade head && pytest && alembic check; окончательно 129 passed за 9.81s, без skip/xfail. Использован существующий test image с неизменными asyncpg-зависимостями и актуальными исходниками в read-only mount |
-| SHA256 services/db/migrations против начала текущего запроса | PASS, бизнес-логика/схема/миграции сохранены |
-| `git diff --check` | PASS |
-
-Запускался только test-db из отдельного проекта в tmpfs. Основная PostgreSQL, её данные и volumes не использовались. Существующие незакоммиченные изменения не откатывались; Git add/commit/push не выполнялись. Новый test_api_processes.py пока untracked и не входит в обычный git diff --stat; его статистика выводится отдельно через git diff --no-index /dev/null.
-
-Дополнительная контрольная отметка `2026-10-22T17:17:57+05:00`: часы двух API-процессов разнесены на одну секунду. Тест теперь сравнивает checked_in_at с часами именно выигравшего процесса, затем проверяет отсутствие перезаписи после проигравшего и повторных запросов. После изменения снова выполнены Ruff, format, Mypy и полный PostgreSQL-прогон той же командой: **129 passed за 8.73s**, без skip/xfail, Alembic check — No new upgrade operations detected. SHA256 services/db/migrations повторно совпали. Это окончательный результат текущего запроса; прежние прогоны 10.24s/9.81s сохранены выше как история.
-
-## Инфраструктурное разделение Core + Notifications — 2026-10-22
-
-Разрешение пользователя: только инфраструктура. Core — бизнес-данные/неизменяемый payload; Notifications в дальнейшем формирует и сохраняет MIME. HTTP relay, приём заданий, SMTP и новый UI не реализовывать. Исходное рабочее дерево чистое; HEAD `6c20757`. Все tracked backend/frontend файлы и OpenAPI сохранены в контрольных SHA256/JSON до правок.
-
-| Время Алматы | Фактически выполнено к контрольной отметке | Результат |
-|---|---|---|
-| 2026-10-22T22:24:48+05:00 | Проверены status/diff, Compose, Core, Alembic, существующие тесты/CI и runtime-роли | Core использовал суперпользователя events. Выбран отдельный bootstrap и две обычные роли; исходный volume не пересоздаётся |
-| 2026-10-22T22:31:02+05:00 | Созданы Notifications, его модель/миграция/тесты, bootstrap и Compose; зафиксированы собственные зависимости на прежних проверенных версиях | Локальные Ruff/format/Mypy Notifications прошли. Начаты сборка образов и полный Core Pytest |
-| 2026-10-22T22:33:48+05:00 | Получены первые полные результаты; сохранены приватные дампы/хеши основной БД; подготовлена заполненная изолированная Core DB | Core: 129 passed за 9.09s, Alembic check PASS. Notifications: 21 passed за 0.86s. Основная БД на момент снимка имела 0 строк; поэтому сохранение непустых данных дополнительно проверялось на отдельном постоянном volume |
-| 2026-10-22T22:35:34+05:00 | Проверен Core под обычной ролью и повторный bootstrap с заполненными обеими БД; после дампа bootstrap применён к основной установке | Core: 129 passed за 13.64s под core_app_test. В изолированной БД до изменения владельцев: 2 events, 4 registrations, 5 outbox, включая версии/очередь/билеты/чекин/payload и ошибки; после первого и повторного bootstrap все хеши совпали. Notifications payload/MIME также сохранены. PostgreSQL container/volume прежние |
-| 2026-10-22T22:36:56+05:00 | Оба сервиса запущены на основном существующем volume; выполнены реальные проверки ролей/изоляции/head/check и независимости Core | core_app/event_registration и notifications_app/event_notifications: обе непривилегированные; чужое подключение=42501. Core head=0002, Notifications head=0001, оба check PASS. Core health/events=200 при остановленном Notifications. На изолированном стеке в этом состоянии через HTTP созданы событие, confirmed+waitlisted и четыре pending outbox |
-| 2026-10-22T22:41:22+05:00 | Дополнительные реальные health-тесты выявили raw asyncpg ошибки; после исправления обнаружен конфликт имён двух test_health.py при collection | Исходный точечный результат: own=PASS, чужая/отсутствующая БД/неверный пароль — 3 FAIL. Health Notifications исправлен: любая ошибка собственного readiness-подключения даёт 503, логируется только имя класса. Конфликт collection устранён обычными tests-пакетами __init__.py; тесты не удалялись/не отключались |
-| 2026-10-22T22:42:22+05:00 | Все Notifications-тесты повторены после исправлений, собран окончательный test image; проверены SHA256/Core OpenAPI | 25 passed за 0.71s, Alembic check без расхождений. Весь Core/frontend и старые миграции побайтно прежние, OpenAPI совпал |
-| 2026-10-22T22:43:55+05:00 | Штатный прогон окончательного Notifications image без bind mounts, контейнерные lint/types и свежие TS/Vite завершены; основная установка обновлена исправленным Notifications | 25 passed за 1.51s; Ruff/format/Mypy PASS (Notifications 18 Python-файлов, app=6). Core Ruff/format/Mypy также PASS (41/25). Vite 8.3.4: 17 modules, 1.21s; Notifications после обновления healthy, HTTP 200 |
-
-### Изменения
-
-- `notifications/`: отдельный проект FastAPI/AsyncSession/asyncpg, собственные pyproject/lock-файлы/Dockerfile/Alembic/tests. Namespace notifications_app исключает смешивание с Core app. Runtime не содержит SMTP/HTTP-relay зависимостей; новые пакеты-инфраструктура не вводились.
-- Модель NotificationJob и новая revision `0001_notification_jobs`: семь полей id/payload/mime/status/attempts/available_at/last_error. Внешний UUID без нового генератора, nullable BYTEA под будущий MIME, JSON-object/state/attempts/MIME constraints и частичный pending index. Downgrade блокируется на непустой таблице. Это storage, не обработка заданий.
-- `infrastructure/postgres/{bootstrap.sh,databases.sql,schema.sql}`: повторяемое создание второй БД и обычных ролей, отзыв PUBLIC/чужого CONNECT, владение собственной схемой/известными таблицами. Нет initdb, DROP, удаления строк или REASSIGN OWNED кластера. Старый events остаётся администратором. psql variables/format обеспечивают quoting; секреты не выводятся.
-- `compose.yaml`: Core использует core_app; Notifications — свою БД/роль и healthcheck. Одноразовые bootstrap/две миграции, отдельный test service. Существующие Core/test/frontend/worker/Mailpit сохранены; ни Core API, ни его health не зависят от процесса Notifications.
-- `.env.example`: отдельные прикладные credentials с локальными defaults для совместимости старого .env. Сам пользовательский .env не менялся.
-- CI: все прежние Core/frontend шаги сохранены, добавлены Notifications lint/format/Mypy/Pytest/migrations, runtime health и проверка stop-service independence. Удалённый GitHub Actions не запускался.
-- README/ARCHITECTURE/DECISIONS/WORKER_EVOLUTION и новый docs/NOTIFICATIONS_INFRASTRUCTURE: текущая инфраструктура, владение payload/MIME, безопасное обновление существующего volume, ограничения и команды. Исторические записи решений/журнала сохранены.
-
-### Реальные команды и результаты
-
-P ниже — сокращённая запись `docker compose --env-file .env.example -p event-registration-notifications-check-20261022 --profile test`. Для runtime-стека использован тот же проект без --profile test, с POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0. Это отдельный PostgreSQL instance для проверок, не второй PostgreSQL основного приложения. Рабочий проект запускается обычным docker compose с существующим .env.
-
-| Проверка | Фактически выполненная команда | Итог |
-|---|---|---|
-| Compose | `docker compose --env-file .env.example config --quiet` | PASS |
-| Сборка обоих сервисов и тестов | `P build api test notifications notifications-test frontend` | PASS; после исправления Notifications его образы пересобраны |
-| Core lint/format/types | `backend/.venv/bin/ruff check backend`; `backend/.venv/bin/ruff format --check backend`; `backend/.venv/bin/mypy --config-file backend/pyproject.toml backend/app` | PASS, 41 Python-файл / 25 app-файлов |
-| Core проверки в образе | `P run --rm --no-deps test ruff check .`; `ruff format --check .`; `mypy app` с тем же префиксом | PASS |
-| Все существующие Core tests | `P run --rm test` | PASS, 129 tests за 9.09s, 0 skipped; внутри upgrade/Pytest/check |
-| Core tests под обычной ролью | `P run --rm --no-deps -e DATABASE_URL=postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test -e TEST_DATABASE_URL=postgresql+asyncpg://core_app_test:core_database_password_local_only@test-db:5432/event_registration_test test sh -c 'alembic upgrade head && pytest && alembic check'` | PASS, 129 tests за 13.64s; учётные данные здесь только отдельной тестовой БД |
-| Notifications lint/format/types | `backend/.venv/bin/ruff check notifications`; `backend/.venv/bin/ruff format --check notifications`; `backend/.venv/bin/mypy --config-file notifications/pyproject.toml notifications/notifications_app` | PASS, 18 Python-файлов / 6 app-файлов |
-| Notifications окончательный образ | `P run --rm notifications-test`; затем `P run --rm --no-deps notifications-test ruff check .`, `ruff format --check .`, `mypy notifications_app` | PASS, 25 tests за 1.51s; Alembic upgrade/check и guard/round-trip включены |
-| TS/Vite свежий запуск | `docker build --target build -t event-registration-notifications-frontend-check:local frontend`; `docker run --rm --network none event-registration-notifications-frontend-check:local npm run build` | PASS, tsc --noEmit и Vite 1.21s; исходники frontend не менялись |
-| Дамп до основного bootstrap | `docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'` и `pg_dumpall --globals-only` с локальным redirect вне репозитория; затем pg_restore --list | PASS; /tmp/MadDevs-notifications-backup-20261022, права 0600. Пароли/данные дампа не выводились |
-| Повторный bootstrap заполненного volume | В изолированном проекте `docker compose ... run --rm --no-deps db-bootstrap`; до/после SELECT count + md5(string_agg(to_jsonb(row)... ORDER BY id)) | PASS: Core 2/4/5 и Notifications payload/MIME побайтно сохранены; cmp снимков/container mount ID успешен |
-| Основной bootstrap и запуск | `docker compose run --rm --no-deps db-bootstrap`; `docker compose up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications` | PASS, bootstrap/обе миграции exit 0; исходный db container и postgres-data mount прежние |
-| Основной schema check | `docker compose exec -T api alembic current/check`; `docker compose exec -T notifications alembic current/check` (current и check отдельными командами) | PASS, Core 0002_simplify_schema, Notifications 0001_notification_jobs; No new upgrade operations detected |
-| Основная изоляция | `docker compose exec -T -e OTHER_DB=... api/notifications python - < /tmp/MadDevs-check-database-boundary.py` | PASS в обоих направлениях: собственная БД доступна, все пять административных flags=false, чужая БД=42501 |
-| Основной Core без Notifications | `docker compose stop notifications`; curl /api/health и /api/events на 127.0.0.1:8080; `docker compose up --no-build --no-deps -d --wait --wait-timeout 60 notifications` | PASS, 200 ok/ready и 200 []; Notifications восстановлен healthy |
-| Бизнес-запись без Notifications | На изолированном стеке stop notifications + HTTP POST event/два registration через frontend, затем SELECT Core own-role | PASS 201/202/202, confirmed=1/waitlisted=1, четыре pending outbox и prepared_at=NULL; основная БД не заполнялась тестовыми данными |
-| Неизменность основной БД | Сравнение снимков строк Core и docker inspect container/mount до/после | PASS. Исходные три таблицы пусты и остались пустыми; отдельно доказано сохранение заполненных таблиц на постоянном тестовом volume |
-| Неизменность кода/контрактов | SHA256 всех tracked backend/frontend против начала этапа, сравнение OpenAPI JSON; `git diff --check` | PASS |
-
-Две БД основного приложения находятся в прежнем PostgreSQL. Core сохранил 24 колонки и старые миграции; Notifications добавил одну прикладную таблицу с 7 колонками и собственную Alembic-служебную таблицу. Наличие jobs/mime/status не означает реализацию HTTP handover, подготовки MIME, retries или SMTP. Принудительный downgrade рабочей БД, очистка данных, удаление volumes, git add/commit/push не выполнялись.
-
-Итоговая контрольная отметка `2026-10-22T22:46:27+05:00`: Core api/db/frontend/Mailpit и Notifications healthy, инфраструктурный worker работает; db-bootstrap и обе миграции exit 0. Подтверждены 24 Core колонки и 7 Notifications колонок, конечные хеши основных строк и ID db container/volume совпадают с исходными. Временный проект проверки остановлен через down --remove-orphans **без --volumes**; все его named volumes сохранены. Исходный пользовательский .env и индекс Git не менялись. Ошибки health/collection исправлены, неустранённых падений выполненных проверок нет. 29 новых файлов пока untracked и не входят в обычный git diff --stat; их статистика выведена отдельно без git add. Этап завершён, relay/SMTP/UI не начаты; commit/push отсутствуют.
-### Обычная роль Core в CI и регрессия повторного bootstrap — 2026-10-22
-
-Все отметки ниже — Asia/Almaty (UTC+05:00), получены из реальных контрольных вызовов часов. Ранее незакоммиченные изменения инфраструктурного разделения сохранены.
-
-- `2026-10-22T22:59:20+05:00`: начало анализа git status/diff, Compose, CI, bootstrap, миграций и тестов. Установлено: роль core_app_test уже создаётся, но штатный Core test всё ещё использует администратора events_test.
-- `2026-10-22T23:04:52+05:00`: конфигурация переключена на core_app_test, добавлена проверка роли в Core fixture и отдельный bootstrap-test. Запущена сборка образов только нового проекта event-registration-bootstrap-check-20261022. Для db/mailpit использован временный override с удалением volume mounts из конфигурации (`volumes: !reset []`) и tmpfs, а не удалением существующих volumes. Собственные теги образов Core/Notifications исключают перезапись основных local-тегов.
-- `2026-10-22T23:06:05+05:00`: Core 129/129 под core_app_test (11.32s), Notifications 25/25 (1.14s), upgrade/check и migration round-trip успешны. Найден и исправлен порядок импортов Ruff в изменённой фикстуре; тестовые образы пересобраны.
-- `2026-10-22T23:08:02+05:00`: новый тест повторного bootstrap прошёл (1/1, 2.68s). Первый запуск выявил ошибку диагностического запроса самого теста: системный тип PostgreSQL relkind возвращался asyncpg как bytes; исправлено явным `relkind::text`. Проверки сохранены полностью. Strict Mypy нового теста проходит без подавления ошибок: для ошибки подключения проверяется точный SQLSTATE 42501 независимо от наличия обёртки SQLAlchemy.
-- `2026-10-22T23:09:28+05:00`: повторный полный Core прогон на окончательном образе — 129/129, 10.43s, без skips. Все статические проверки, явные tsc/Vite, startup/health и независимость Core при остановленном Notifications прошли. Обе runtime-схемы изолированного CI-стека прошли alembic check.
-
-Автоматический инфраструктурный тест создаёт событие с schedule_version=3, регистрации confirmed/waitlisted/cancelled с participation_no=2, билет/чекин/хеши, очередь с номером 7, три outbox-записи sent/pending/failed и три задания Notifications с payload, MIME и диагностикой попыток. Два повторных вызова настоящего bootstrap.sh сравнивают полные строки всех прикладных таблиц и alembic_version, владельцев БД/схем/таблиц/индексов, ACL, определения индексов/constraints. Проверяются READ COMMITTED, обычные роли без членства, собственные DML/DDL-права, отсутствие PUBLIC/чужих DB-привилегий и реальные отказы подключения 42501 в обоих направлениях до/после повторов. Очистка удаляет только UUID этого теста.
-
-Для команд ниже `C` означает `/tmp/maddevs-bootstrap-ci-compose`, созданный для этого прогона shell-wrapper:
+# Development log
+
+Timezone: Asia/Almaty, UTC+05:00. Timestamps are actual clock observations/recording points, not invented command durations or reconstructed times of earlier chat messages. A proposal timestamp is not its approval time.
+
+This English edition retains the historical sequence, timestamps, material outcomes and failures. Long historical command transcripts are summarized for readability; their original verbatim wording/commands remain in the existing Git history at [dff7a3766075453d6987256ef6d92f45d77e7f0d](https://github.com/Bolat141101/event-registration/blob/dff7a3766075453d6987256ef6d92f45d77e7f0d/DEVELOPMENT_LOG.md). No commits/dates were rewritten. Statements that UI/SSE/SMTP were absent refer only to the explicitly dated old stage. Current functionality is documented in README/ARCHITECTURE. New2026-10-26 actions are appended separately below.
+
+## Initial analysis:2026-10-19
+
+| Almaty observation | Actual work and result |
+| --- | --- |
+| 2026-10-19T22:29:41+05:00 | Started workspace/PDF-skill inspection; one original PDF found. |
+| 2026-10-19T22:30:34+05:00 | Checked initial Git; no commits, PDF already staged, root main.py empty/untracked. PyMuPDF unavailable; pypdf read13pages, including complete1/2/9. No essay requirement found. Asked whether Mailpi meant Mailpit. |
+| 2026-10-19T22:31:07+05:00 | Visually checked pages1/2/9, PostgreSQL locking/Mailpit primary references and PDF SHA256. Relevant text readable; original unchanged. |
+| 2026-10-19T22:33:04+05:00 | Created requirements matrix/acceptance/A01–A09. User confirmed Mailpit; functionality still planned only. |
+| 2026-10-19T22:37:22+05:00 | Created architecture: components/schema/transactions/FIFO/check-in/outbox/reminders/SSE/API/tests/risks. Requirements91lines, architecture308lines. Diff whitespace clean; untracked files need separate checking. |
+| 2026-10-19T22:39:18+05:00 | Created decisions/log; checked Markdown/newlines/fences and unique sequential18G/16C/7U/9A/D01–D10. PDF hash unchanged; no application checks or commits. |
+| 2026-10-19T22:39:58+05:00 | Clarified reminder reactivation and prepared-message immutability; local links/format checked. Architecture opening queued in Codex; stopped for approval, implementation not begun. |
+
+Primary references were PostgreSQL explicit locking/isolation and Mailpit runtime/import options. They informed engineering proposals, not runtime external dependencies or extra assignment requirements. Temporary PDF images lived under /tmp/maddevs-requirements-review, outside Git. No applicable AGENTS.md was found in workspace/checked parents. PDF/openai-docs instructions were read; no model version guessed from public availability and no subagents used.
+
+## Architecture revision and CI:2026-10-20
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-20T08:42:03+05:00 | Reviewed new user feedback/Git; main now had upstream origin/main and user-created ecc4273 first_commit. Root main.py still untracked. |
+| 2026-10-20T08:43:20+05:00 | Checked PostgreSQL/Celery/Redis/WHATWG/RabbitMQ/Mailpit sources for isolation/ACK/redelivery and SMTP limitations. |
+| 2026-10-20T08:47:15+05:00 | Simplified outbox, tokens/routes/ACID/SSE: removed leases/processing/multi-sender coordination; computed Message-ID, retained prepared_at; public email cannot restore cancelled participation. |
+| 2026-10-20T08:49:34+05:00 | Added queue alternatives/future migration/extension boundaries/tradeoffs; U08–U10; implementation/tests not authorized yet. |
+| 2026-10-20T08:51:18+05:00 | Four-doc verification: G18/C16/U10/A9, sections1–14, then12outbox fields, removed fields/routes absent. Only Markdown changed; HEAD/index/PDF/main.py unchanged, diff check passed. |
+| 2026-10-20T15:09:43+05:00 | Inspected manifests/Compose/tests/Git and official Actions syntax. No workflow existed; preserved user's default DB port5433. |
+| 2026-10-20T15:12:08+05:00 | Created workflow push/PR-main, one job, existing images/locks, isolated project/health/cleanup; made POSTGRES_PORT configurable. |
+| 2026-10-20T15:13:09+05:00 | Actionlint1.7.12 and run-block bash checks passed. Ruby Psych used because PyYAML absent; no app dependency added. Local reproduction script only in /tmp. |
+| 2026-10-20T15:14:14+05:00 | Complete local CI exit0: Ruff/format/Mypy,30tests0.54s, migration round-trip/check, frontend build, clean Compose and exact health JSON. Pinned images support Linuxamd64. Removed only this historical CI project's containers/volumes. |
+| 2026-10-20T15:15:40+05:00 | README/decisions/diff/isolation verified. HEAD/index unchanged, ordinary services health200, no CI resources left, no push/remote Actions/next stage. |
+
+At that historical infrastructure stage, registration/FIFO/check-in/delivery/SSE were not implemented; this is not the present state. Checkout was pinned, permissions contents:read, no credential persistence. Exact workflow commands were locally reproduced, not a claim of running GitHub's checkout/runner.
+
+## Schema simplification:2026-10-21
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-21T21:23:51+05:00 | Clean HEADeb34b8c; infrastructure/health existed, no business services. |
+| 2026-10-21T21:26:32+05:00 | Ordinary services running, all three domain tables empty, old schema34fields. |
+| 2026-10-21T21:31:06+05:00 | Models5+9+10, new0002 and locked sequence helper/tests; local Ruff/format/Mypy passed after long-line/nested-with fixes;0001 unchanged. |
+| 2026-10-21T21:31:30+05:00 | Updated docs, started full PostgreSQL/frontend no-cache checks; saved private /tmp/MadDevs-before-0002-20261021.dump outside Git. Running checks not yet claimed PASS. |
+| 2026-10-21T21:32:46+05:00 |43passed/0skips; fresh tsc/Vite, container Ruff/format passed; Mypy still running at observation. |
+| 2026-10-21T21:34:07+05:00 | Mypy13files, main db/api/frontend/Mailpit healthy, worker up/migrate0. Revision0002,24columns; health/OpenAPI/frontend200; main schema check matched. |
+| 2026-10-21T21:35:28+05:00 | Dedicated empty test-DB CLI downgradebase/upgradehead/check passed. Populated downgrade regression explicitly refused without partial DDL; no old-revision changes or unresolved check errors. |
+| 2026-10-21T21:36:40+05:00 | Verified actual names/nullability5+9+10. Existing services/ORM normalization/locked MAX helper ready; business registration/worker delivery remained future at that time. |
+
+Executed local/container Ruff/format/Mypy, full `docker compose --profile test run --rm test`, no-cache frontend tsc/Vite, explicit test-only Alembic downgrade/upgrade/check, main upgrade/start and SQL information_schema count. New0002 retained data and forbade lossy populated rollback; no users table. Removed fields included title, duplicate email spelling, next sequence and redundant audit timestamps; backup is needed to recover those values. Presence of a schema/helper was not claimed as business correctness. No invented rollback dates, fake commit or push.
+
+## Business services/API/outbox:2026-10-22
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-22T11:10:42+05:00 | Read attachment/status/diff/contracts; clean HEAD2649399 refactor db. User had saved schema/MAX helper; services absent. |
+| 2026-10-22T11:11:12+05:00 |24columns sufficient; keep migrations/MAX helper/event-lock. |
+| 2026-10-22T11:17:29+05:00 | Created services/outbox/HTTP/access/errors, installed validator. Initial Ruff import/format and Mypy missing-email_validator issues resolved after installation. |
+| 2026-10-22T11:21:19+05:00 | Local static checks passed; started real concurrent PostgreSQL rollback/time/version/outbox tests, no worker/SQLite. |
+| 2026-10-22T11:24:41+05:00 |67tests passed; added HTTP/concurrency/time cases, retaining old tests. Prepared state was only a fixture for the future sender. |
+| 2026-10-22T11:27:00+05:00 |108passed/1failed of109: rollback test compared confirmed count to a pre-registration snapshot. HTTP/auth/real lock-timeout checks passed. |
+| 2026-10-22T11:27:56+05:00 | Corrected that fixture snapshot and strengthened failure after outbox flush; static/config/isolation passed, reran all. No user volumes removed. |
+| 2026-10-22T11:31:23+05:00 |109passed3.87s/0skips; separate business-check project with clean DB/random ports/migrate0. |
+| 2026-10-22T11:32:48+05:00 | Real proxied smoke: create/register/FIFO/resume/move/check-in, expected200/201/202/401/404/409/422, counts1/1/1, one reminder per registration. SMTP not yet called. Container static passed, test downgrade done/upgrade running. |
+| 2026-10-22T11:35:22+05:00 | CLI upgrade/check passed and ordinary environment updated preserving data. Review found post-start202existing/409new email disclosed registration existence. |
+| 2026-10-22T11:36:03+05:00 | Unified post-start neutral202 without inserting participation/outbox; HTTP regression and time tests added. Static passed; full suite still running. |
+| 2026-10-22T11:38:24+05:00 |110passed4.13s, no skip/xfail; Alembic check clean; fresh smoke started. |
+| 2026-10-22T11:40:20+05:00 | Smoke/static passed, but ordinary proxy returned502 despite healthy API; main schema check passed. Only new historical smoke volumes removed. |
+| 2026-10-22T11:41:09+05:00 | Logs proved stale upstream IP; added Docker DNS resolver, read official Nginx guidance, rebuilt/tested. |
+| 2026-10-22T11:42:36+05:00 | Rebuilt frontend/nginx-t/health200; fresh isolated proxy regression. Backend unchanged after110passes. |
+| 2026-10-22T11:45:05+05:00 | Recreated API changed192.168.16.4->.5 while frontend ID stayed; health recovered200. Main read-only schema5/9/10/head0002. |
+| 2026-10-22T11:47:42+05:00 | Final110tests/all smoke passed; main healthy, test DB stopped, only new smoke resources removed. Models/migrations/helper/index/HEAD unchanged,18new files not staged; no commit/push. |
+
+Executed `docker compose --profile test run --rm --no-deps test ruff check .`, formatcheck40files, Mypy25files, full test upgrade/Pytest/check110(102integration+8unit), dedicated test CLI downgrade/upgrade/check, Compose config/build/start, nginx-t, curl health and /tmp/MadDevs-backend-smoke.py plus /tmp/MadDevs-proxy-recovery.py in the separate business-check project. The proxy regression proved real IP change without frontend restart; initial502 was fixed, not ignored. Tests cover real event-lock waits, last place/canonical email/FIFO/cancel-vs-new/two cancels/resumes/check-ins/post-lock clock, prepared immutability, late reminder, rollback/access/hash/privacy. No schema change; SMTP/SSE/full UI were outside this historical stage. Ambiguous COMMIT/event-create idempotency limitations remained explicit.
+
+## UTC boundaries and null descriptions
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-22T12:18:34+05:00 | Preserved uncommitted business changes; found astimezone OverflowError and missing description NUL validation. |
+| 2026-10-22T12:21:04+05:00 | UTCDateTime/AfterValidator(as_utc), overflow->ValueError and API/service NUL validation; seven API regressions for create/move boundaries and unchanged state. Fixed Ruff long line and reran static. |
+| 2026-10-22T12:21:54+05:00 |117passed4.38s/no skips; check clean on separate PostgreSQL/read-only app/tests mounts. No main data/schema/dependency change. |
+
+Dates0001-01-01T00:00:00+01:00 and9999-12-31T23:59:59-01:00 now return422 before service execution. README removed registration/FIFO/check-in from future work. Local Ruff40/Mypy25 passed; full Docker test ran upgrade/Pytest/check. No volume deletion/commit/push.
+
+## AsyncSession/asyncpg conversion
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-22T16:06:25+05:00 | Clean HEAD9a5694a; saved OpenAPI/model/revision hashes before async conversion. |
+| 2026-10-22T16:18:31+05:00 | Converted endpoints/services/DB/dependency/worker/Alembic/fixtures; static passed and OpenAPI matched. Isolated async-check project/tmpfs test DB/random port55012. |
+| 2026-10-22T16:20:48+05:00 | First run122passed/2failed plus teardown error: missing await in callback and cached pg_stat_activity observer. Added await and pg_stat_clear_snapshot, no weaker assertions. |
+| 2026-10-22T16:23:34+05:00 |124passed8.13s, check/static/fresh tsc/Vite and clean full stack passed. |
+| 2026-10-22T16:24:25+05:00 | Native container suite124passed6.19s/no skips, real HTTP contracts/codes passed; OpenAPI/models/revisions byte-identical. |
+| 2026-10-22T16:26:03+05:00 | Empty test-only CLI downgrade/upgrade/current/check,24columns/head0002; DB unavailable503/503 then healthy200, worker SIGTERM clean. Initial restart omitted random-port env/conflicted5433, corrected without touching main. |
+| 2026-10-22T16:28:28+05:00 | Cleanup after22m03s removed only temporary containers/network without --volumes; test volumes retained. Main environment unchanged; all previous tests preserved, no remaining failures/commit/push. |
+
+create_async_engine/sessionmaker retained READ COMMITTED/pre_ping/hide_parameters/expire_on_commitFalse; asyncpg connect3s/lock2s/statement3s. Async SQL/transactions do not change event-first/MAX/FIFO/generation/token/reminder/freeze behavior. Core error handlers include raw asyncpg OSError/TimeoutError. Worker uses asyncio.Event; it was still a readiness probe then, not delivery. Alembic uses AsyncConnection.run_sync; test harness to_thread avoids nested asyncio.run. DSNs became postgresql+asyncpg, asyncpg0.32.0 and SQLAlchemy asyncio extras replaced psycopg without unrelated version changes; greenlet retained. Each task/session is independent, engines disposed after DDL/event-loop changes.
+
+Executed local and Docker Ruff40/Mypy25, local pytest1248.13s, `P run --rm test`1246.19s, test-only Alembic round-trip/check, fresh isolated frontend tsc/Vite8.3.4(17modules,2.53s), complete Compose/HTTP business smoke and DB failure/recovery. P was the async-check project plus /tmp/MadDevs-async-test-port.yaml; no main volumes. Seven added tests covered sync-DSN rejection, API/readiness during locking, OSError/TimeoutError, cancellation rollback/lock release and connection failures. Workflow steps unchanged, remote Actions unrun.
+
+## Ticket validation and two actual API processes
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-22T17:10:29+05:00 | Preserved uncommitted async work; recorded business/DB/revision hashes. |
+| 2026-10-22T17:14:02+05:00 | Added ticket NUL validator/three regressions, read-only verification after registration POST, spawned two Uvicorn processes with separate engines/PIDs/ports. Unsupported Compose run --no-build flag removed before execution. |
+| 2026-10-22T17:15:22+05:00 |129passed10.24s/check/static passed; improved process teardown and DB ticket comparison, reran. |
+| 2026-10-22T17:15:45+05:00 |129passed9.81s/no skips, hashes unchanged and AST confirms no business.join creating the HTTP result. |
+| 2026-10-22T17:17:57+05:00 | Offset process clocks1s to identify winner timestamp; verified no overwrite after losers/repeats. Final129passed8.73s/static/check; business/schema/migration hashes still match. |
+
+Ruff41/Mypy25 and full read-only-mounted test suite ran against async-check tmpfs only. Two real HTTP processes wait on a held event lock, observed via refreshed PostgreSQL stats; capacity1 gives202/202,1confirmed/1waiting,one ticket/queue1/four outbox identities. Check-in gives200/409, one winner timestamp/count, repeats409 through both. Teardown treats forced kill as failure. NUL returns422 before SQL. Existing registration HTTP test performs SELECTs for one registration/two ticket-reminder outbox rows instead of calling join to manufacture its result. No new dependencies/schema/infrastructure, main data access, git add/commit/push.
+
+## Core/Notifications infrastructure split
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-22T22:24:48+05:00 | Clean HEAD6c20757; saved backend/frontend/OpenAPI hashes. Core still used administrator events; chose separate bootstrap/two ordinary roles without recreating volume. |
+| 2026-10-22T22:31:02+05:00 | Created independent Notifications/storage/migration/tests/bootstrap/Compose, pinned existing-compatible dependencies; local static passed, builds/Core suite started. |
+| 2026-10-22T22:33:48+05:00 | Core129passed9.09s, Notifications21passed0.86s/check. Saved private main backups/hashes; main had0rows, so separately seeded a persistent test volume to prove populated preservation. |
+| 2026-10-22T22:35:34+05:00 | Core129passed13.64s under core_app_test. Seeded2events/4registrations/5outbox plus Notifications payload/MIME survived first/repeated bootstrap by hashes. After backup, historical main bootstrap ran with same PostgreSQL container/volume. |
+| 2026-10-22T22:36:56+05:00 | Both services on existing volume; ordinary roles, reverse CONNECT42501, heads0002/0001/check passed. Core health/events200 with Notifications stopped; isolated HTTP proved201/202/202,FIFO,fourpending outbox. |
+| 2026-10-22T22:41:22+05:00 | Extra real health checks: ownPASS, foreign/missing DB/wrong-password3FAIL due raw asyncpg errors. Fixed safe503/readiness class-only logging; test_health collection-name collision fixed with test packages, no tests deleted. |
+| 2026-10-22T22:42:22+05:00 | Notifications25passed0.71s/check; final image built; tracked Core/frontend/OpenAPI/old revision hashes unchanged. |
+| 2026-10-22T22:43:55+05:00 | Final image25passed1.51s/static18files/Mypy6, Core41/25static; fresh tsc/Vite17modules1.21s. Historical main Notifications updated/healthy200. |
+| 2026-10-22T22:46:27+05:00 |24Core/7Notifications columns, original rows/container/mount hashes retained; bootstrap/migrations0. Temporary project down without volumes; main .env/index unchanged,29newuntracked files, no commit/push. Relay/SMTP/UI not started in that stage. |
+
+Notifications gained own namespace/dependencies/Docker/Alembic and seven-field jobs with nullable MIME; no storage column was claimed as inbox/sender correctness. Repeatable shell/psql bootstrap creates/isolate roles/DBs and transfers known ownership without DROP/data deletion/cluster-wide REASSIGN. Secret values were not printed. Historical /tmp/MadDevs-notifications-backup-20261022 dumps were0600/outside Git. Main bootstrap during this earlier authorized stage is recorded honestly; **the2026-10-26 readiness task does not repeat it**.
+
+Checks used notifications-check-20261022 with .env.example/random ports: all Core129 and Notifications25, static, migrations/guards, fresh frontend build, populated bootstrap hashes, reverse42501, Core independence and business writes without Notifications. Original literal commands and backup/upgrade details remain in the cited Git revision. No main downgrade/deletion/volume recreation or agent commit/push.
+
+## Ordinary-role CI and repeated bootstrap
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-22T22:59:20+05:00 | Preserved dirty infrastructure changes; found core_app_test existed but normal Core test still used events_test administrator. |
+| 2026-10-22T23:04:52+05:00 | Switched role/added privilege fixture/separate bootstrap target; built bootstrap-check project with tmpfs !reset override and separate image tags, no main volumes. |
+| 2026-10-22T23:06:05+05:00 | Core129/12911.32s, Notifications25/251.14s, migration checks passed. Fixed Ruff import order/rebuilt. |
+| 2026-10-22T23:08:02+05:00 | New repeated-bootstrap1/1passed2.68s. First diagnostic query needed relkind::text because asyncpg returned bytes; exact42501 checks retained, strict Mypy clean. |
+| 2026-10-22T23:09:28+05:00 | Final Core129/12910.43s/no skips, static/fresh tsc/Vite/startup/health/stop-service independence passed; both runtime schema checks clean. |
+| 2026-10-22T23:12:53+05:00 | Inspect proved tmpfs/0named mounts for db/test-db/mailpit; project-scoped down exited0 without --volumes. Only test infrastructure/workflow/docs changed; no main/old SQL/migration/business/frontend mutation or commit/push. |
+
+The test seeds schedule_version3, confirmed/waitlisted/cancelled generation2, tickets/check-in/hash/queue7, sent/pending/failed outbox and three Notifications jobs with MIME/attempt errors. Two actual bootstrap.sh calls compare complete rows/Alembic/owners/ACL/indexes/constraints/default privileges, ordinary-role DML/DDL/READ COMMITTED and real cross-DB denials before/after. Cleanup targets its own UUIDs only. Total155unique tests(129+25+1), no disabled checks. C=/tmp/maddevs-bootstrap-ci-compose used only its guarded tmpfs override and .env.example; runtime/static/full/migration/smoke commands locally matched CI, not a remote run.
+
+## Async HTTP relay and durable inboxv1
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-22T23:24:43+05:00 | Clean Git; inspected Core probe worker/outbox and Notifications without inbox. |
+| 2026-10-22T23:29:10+05:00 | Addedv1DTOs/async relay/commit-before-ACK/new0003forwarded. Existing business/API/scheduling untouched. httpx0.28.1 moved to runtime, pip-compile locks retained pinned versions. |
+| 2026-10-22T23:33:23+05:00 | Core strict Mypy passed; real DB/API regressions/schema and separate project created. |
+| 2026-10-22T23:36:12+05:00 | Notifications48/48. First Core upgrade double-applied CHECK naming convention; fixed only new0003withop.f after rollback. Core149/149, then data-preserving/guard regression added. |
+| 2026-10-22T23:43:59+05:00 | Real outage/SIGKILL/restart/duplicate202/conflict409/auth401 passed. TCP proxy lost response after committed inbox; Corepending then forwarded on retry/restart. Added total asyncio deadline beyond phase timeouts. |
+| 2026-10-22T23:48:01+05:00 | Core152/152 incl deadline/crash-after-prepare, static passed; docs prepared, numeric date rejection strengthened to match JSON Schema. |
+| 2026-10-22T23:53:58+05:00 | Final Core152/15228.09s and all static passed; repeated real smoke with final images. |
+| 2026-10-22T23:55:54+05:00 | Notifications52/521.30s, infrastructure3/33.88s/no skips. Actual Core24cols,4forwarded+4futurepending/sent0; Notifications7cols/4unique pending/mimeNULL/attempts0; both schema checks clean. |
+| 2026-10-22T23:58:48+05:00 | Health200/diff clean, tmpfs/0named mounts verified; down0withoutvolumes. Main unused,14newuntracked files, no commit/push. |
+
+Ruff/import formatting and infrastructure MYPYPATH namespace issues were fixed without ignores. New modules: relay prepare/run_once/finish/backoff, independent contract DTOs/schema, inbox insert-on-conflict/normalized JSON, protected API, worker network lifecycle and forwarded migration. ID/JSON froze before HTTP; SQL did not span network. Repeated inbox acceptance never resets MIME/status/attempts. Core prepared retries remain historical through business changes because ACK may be lost; exhaustion after8started attempts stays failed for explicit intervention. No SMTP/MIME rendering/leases/Redis/Kafka/Celery yet at that historical point.
+
+C=/tmp/maddevs-relay-compose selected relay-check-20261022, tmpfs/random ports/separate tags; only its smoke worker used poll0.2/backoffcap10/max20. Executed config/build, Core static46/Mypy28/full152, Notifications22/Mypy9/full52, infrastructure4files/full3, runtime start/check/health and complete relay_smoke.py phases create/outage/recover/lost-response/recover. Total207Pytest/no skips plus actual TCP smoke. Business/old migrations/frontend unchanged; remote Actions unrun.
+
+## Relay head-of-line blocking
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-23T08:38:01+05:00 | Preserved20tracked changes/14new files from HTTP stage; reviewed relay/worker/tests. |
+| 2026-10-23T08:44:13+05:00 | Added bounded distinct-event heads, UUIDcursor/cutoff/NOWAIT and post-rollback55P03 handling. Other DB errors propagate; FIFO/API/schema unchanged. |
+| 2026-10-23T08:50:07+05:00 | Started own hol-check build, tmpfs/random ports/separate tags. |
+| 2026-10-23T08:54:32+05:00 | Core160/160; remaining suites and negative old-algorithm control started. |
+| 2026-10-23T08:57:46+05:00 | Notifications52/52,infrastructure3/3; eight new PostgreSQL regressions pass. Old selection in disposable read-only mount failed expected TimeoutError1.68s; restored implementation passed all8. |
+| 2026-10-23T09:00:57+05:00 | Running-service lockA did not stop Bforwarded; after unlock Aforwarded. Started old CI TCP failure/restart/ACK-loss suite. |
+| 2026-10-23T09:02:39+05:00 | TCP suite passed. Extended strict Mypy found two nullable accesses in imported old test; explicit row existence asserts added, no suppressions. |
+| 2026-10-23T09:04:36+05:00 | Final Core160/16016.52s/static clean; runtime Alembic both clean. |
+| 2026-10-23T09:06:53+05:00 | Final diff/status/settings/docs recorded. |
+| 2026-10-23T09:08:44+05:00 | Tmpfs/no named mounts verified; down0withoutvolumes. Main untouched,15untracked paths excluded by normal stat, no commit/push. |
+
+DISTINCT ON gives one ready `(available_at,id)` head per event; UUIDround-robin/cutoff traverses bounded pages fairly, one HTTP per call. Busy pages pause then continue rather than blacklist/spin. Only55P03after full rollback is skipped; skipped row payload/prepared_at/attempts/deadline/error do not change. Tests cover pending/prepared/multiplemessages/multipleblockedpages/update locktimeout/otherDBerrors/new arrivals/idle/restart. Relative retry backoff remains; global oldest order across independent events was deliberately replaced, not strict delivery ordering after faults.
+
+Executed CoreRuff47/Mypy29/full16016.52s; Notifications22/9/full523.81s; infrastructure4/full35.75s; new8tests0.90s; fresh tsc/Vite17modules; all Compose/migration/health/independence/HOL/TCP smoke passed. Total215unique/no skips, expected old negative FAIL separate; no SMTP implemented by this fix.
+
+### Independent repeat verification
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-23T09:11:41+05:00 | User requested recheck; dirty tree preserved, no app changes. |
+| 2026-10-23T09:12:59+05:00 | Rebuilt isolated images; Core160passed13.58s, check/static47/29passed, all business/migration/two-process/relay regressions. |
+| 2026-10-23T09:13:41+05:00 | Notifications52passed1.18s/infrastructure3passed3.99s, all static/fresh tsc/Vite/startup. Real HOL: lockedApending/attempt0/unprepared, Bforwarded, thenAforwarded/attempt1. |
+| 2026-10-23T09:14:23+05:00 | Complete real outage/SIGKILL/ACKloss/restart/duplicate202/conflict409/auth401 smoke passed; Core still200/201/202during outage. |
+| 2026-10-23T09:15:19+05:00 | Five repetitions of10blocking/API-process tests passed4.15/4.21/4.13/4.43/3.62s, not50new unique tests. Both schemas clean;4forwarded/4futurepending/no failed orsent, all health/assets200,Mailpit0. Tmpfs/no named mounts/logs clean. |
+| 2026-10-23T09:15:38+05:00 | Notifications4unique pending/mimeNULL/attempts0. One-off diagnostic import used wrong namespace; corrected to notifications_app.models/db, no service code change. |
+| 2026-10-23T09:16:26+05:00 | Down0withoutvolumes, main untouched/diff clean.215unique passes plus50repeat executions, journal only changed in recheck; no commit/push. |
+
+The original HOL defect was not reproduced after the fix. This was still a historical pre-SMTP/UI stage; no claim of whole-project completion or remote Actions was made.
+
+## Async SMTP sender
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-23T09:39:07+05:00 | Clean HEADc4215d3; reviewed outbox/relay/inbox7fields/CI and retainedv1historical commands. User authorized SMTP only then. |
+| 2026-10-23T09:42:50+05:00 | Implemented render/load/async adapter/prepare-send-finish; MIME/attempt/backoff commit precedes SMTP. First pip-compile cache path unavailable; /tmpcache succeeded, only aiosmtplib5.1.3 added, other pins retained. |
+| 2026-10-23T09:44:52+05:00 | Settings/worker/retry/Compose/test-mailpit/tests ready; strict Mypy passed; checked official aiosmtplib raw-send/error and Mailpit docs. |
+| 2026-10-23T09:47:53+05:00 | Isolated images built; Core160passed10.73s/check; main data untouched. |
+| 2026-10-23T09:48:28+05:00 | Notifications89passed/3failed: real lazy HeaderParseError plus two incorrect async-with pytest.raises tests. Fixed both causes. Infrastructure8passed/1failed searched raw quoted-printable instead of decoded MIME; corrected test, no disabling. |
+| 2026-10-23T09:50:22+05:00 | Notifications92/92; real SMTP4xx/5xx/disconnect/timeout/dedup/restart/MIME/budget/replay passed; safe failed/pending diagnostics. |
+| 2026-10-23T09:52:08+05:00 | Existing real HTTP outage/SIGKILL/ACKloss/restart/ID conflict smoke passed; new two-role/test-Mailpit Core time/cancel/resume/move integration ran. |
+| 2026-10-23T09:53:11+05:00 | Infrastructure11passed18.16s; real SMTP pause->pending, kill->restart->sent and accepted DATA/lost reply recovery passed. Four runtime emails matched stored headers/decoded body, one current-store copy each. |
+| 2026-10-23T09:57:40+05:00 | Subprocess retry denied without acknowledgement, requeued only failed without ID/JSON/MIME change, repeated pending reset rejected. Notifications93passed4.28s; unchanged frontend fresh tsc/Vite passed. |
+| 2026-10-23T09:58:48+05:00 | Core24cols/4forwarded+4futurepending, Notifications7cols/4sent/MIME; both checks/health200, nine services running, four tmpfs stores/no named mounts/log failures. |
+| 2026-10-23T09:59:38+05:00 | Added hide_input_in_errors/startup regression; rebuilt final Notifications. Public contract/business/migrations unchanged. |
+| 2026-10-23T10:01:26+05:00 | Final Notifications94passed4.03s/static31/Mypy15; new API/sender SMTP recover retained four sent MIME/copies. Final infrastructure repeat started. |
+| 2026-10-23T10:02:57+05:00 | Infrastructure11passed14.96s; total265unique/no skips(160+94+11), static/schema/health/HTTP/SMTP all successful. |
+| 2026-10-23T10:03:54+05:00 | Logs/4tmpfs/no paused stores verified; down0withoutvolumes.18tracked+12new files, no main data/schema changes/commit/push. |
+
+New MIME/SMTP/sender/worker/clock/retry modules, test-only Mailpit, settings and aiosmtplib were separate from Core business. Core's worker startup wording was updated; bootstrap test alone acquired Notifications runtime dependencies through build context. Real tests prove immutable Date/ID/envelope, transaction-free SMTP, permanent/temporary error policy, explicit CLI and double freeze semantics. SMTP DATA accept before lost response remains ambiguous; no general exactly-once/eventual guarantee beyond the automatic attempt budget. No UI/SSE was added in this historical SMTP stage. Exact static/full/runtime commands used smtp-check tmpfs/separate tags, including original relay_smoke.py and new smtp_smoke.py, and are retained in the original command transcript.
+
+## Damaged MIME cannot block sender
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-23T13:47:32+05:00 | Preserved uncommitted SMTP work; inspected load_prepared/Sender/tests, no schema/business change. |
+| 2026-10-23T13:48:51+05:00 | Seven new pre-fix tests all failed: lazy From/To quote/a@[ parsing caused IndexError/AttributeError, plus explicit parser exception cases. Expected negative control, not disabled tests. |
+| 2026-10-23T13:50:39+05:00 | Local parse/header guard converts IndexError/AttributeError/HeaderParseError to safe ValueError.18MIME units passed0.10s/static clean; no global sender catch. |
+| 2026-10-23T13:51:32+05:00 | Core160passed13.39s, migration/static checks passed. |
+| 2026-10-23T13:53:08+05:00 | Infrastructure11passed16.19s on real test-DB/Mailpit; dependency download took time, no new package added. |
+| 2026-10-23T13:53:50+05:00 | Notifications105passed4.70s/static/check; total276unique/no skips(160+105+11). |
+| 2026-10-23T13:55:10+05:00 | Tmpfs/no named mounts verified, isolated down0withoutvolumes, main untouched/diff clean, no commit/push. |
+
+Only MIME parser, unit/sender regressions and log changed in that fix; existing Sender ValueError handling already marked failed with safe error and continued. Eleven cases: four damaged-header units, three parser-error units, four real PostgreSQL queue cases. The damaged job preserves payload/MIME/attempt/deadline, invokes neither SMTP nor renderer, and the following valid job sends. The negative command selected damaged_address/parser_errors before repair; all full suites passed afterward.
+
+## IDNA2008 email identity
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-23T15:34:37+05:00 | Clean HEAD57aab8b; found Core ignored validated ascii_email while Notifications used IDNA2003. User authorized collision-audited migration, no merge/delete/message rewriting. |
+| 2026-10-23T15:36:47+05:00 | Historical main own-role READ ONLY preflight:0registrations/changed/invalid/collisions, no addresses printed or main upgrade/restart. Validator confirmed faßIDNA distinct fromfass, dots/+suffixes retained. |
+| 2026-10-23T15:38:45+05:00 | Independent canonical helpers, pre-lookup/ORM normalization, new0004frozen-policy atomic audit/ASCII CHECK/email-only UPDATE. Outbox/Notifications messages untouched; validator2.3.0/dnspython2.9.0 pins aligned, others unchanged; Alembic hides binds. |
+| 2026-10-23T15:42:26+05:00 | Read-only audit CLI/migration/HTTP/two-process/legacy tests and isolated IDNA build; fixed SQL-string formatting without skipping checks. |
+| 2026-10-23T15:44:45+05:00 |9Core email units/25MIME units and strict Mypy all services/infra passed; cross-service references/SMTP RCPT added. |
+| 2026-10-23T15:45:34+05:00 | Core177passed26.62s, populated preservation/abort collision including cancelled/invalid legacy/read-only audit/round-trip; concurrent Unicode/Punycode requests yield one confirmed/two logical jobs. |
+| 2026-10-23T15:46:29+05:00 | Notifications116passed7.26s; legacy JSON and correct MIME casing/bytes retained; wrongfass failed/noSMTP/nextsent/manualretryrejected. Real RCPT user@xn--fa-hia.de without SMTPUTF8. |
+| 2026-10-23T15:47:31+05:00 | Infrastructure21passed32.85s, four full-path parameters/reference policy/roles/bootstrap. Real service smoke: equivalent identity and four distinct correct ASCII emails includingfass/dots/+tag. |
+| 2026-10-23T15:50:57+05:00 | Existing real HTTP/SMTP outage/kill/ACKloss/DATA-loss/recovery passed; runtime audit8total/changed0/invalid0/collisions0, both schema checks clean. |
+| 2026-10-23T15:53:30+05:00 | Corehead0004/24cols/8ASCII registrations/8forwarded+8futurepending; Notifications7cols/8sentfrozen. Old revisions/business/API/relay/frontend unchanged. |
+| 2026-10-23T15:56:54+05:00 | Nine services healthy/health200/logs clean/four tmpfs/no named or paused mounts; down0withoutvolumes.20tracked+8new files, main not migrated/restarted, no commit/push. |
+
+Total314unique(177+116+21)/0skips. No automatic merge/winner selection or frozen recipient repair.0004 updates only registration email after complete locked audit; downgrade cannot reconstruct prior spelling without backup. Already sent wrong mail cannot be retracted. New modules/tests cover audit, canonical identity and every retry's frozen recipient comparison; cross-service SMTP reaches actual Mailpit. Main inspection was historical read-only only, and no UI/SSE was added by this step.
+
+## Configuration diagnostics without secrets
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-23T16:02:28+05:00 | Inspected Settings/API/worker/CLI/Alembic while preserving IDNA20tracked+8new files; no main data access. |
+| 2026-10-23T16:07:17+05:00 | Pre-fix Core config9failed/6passed exposed real startup stderr leaks; an initial wrong root test path ran nothing, corrected invocation reproduced them. Added hide_input/repr protection and Alembic bind hiding. Targeted20Core/33Notifications passed, strict Mypy33/18/static clean; isolated config project built. |
+| 2026-10-23T16:09:00+05:00 | Core186passed19.99s and existing IDNA/concurrency/migrations/check/static passed. |
+| 2026-10-23T16:09:44+05:00 | Notifications124passed12.69s/check and infrastructure static6files passed. |
+| 2026-10-23T16:10:50+05:00 | Infrastructure21passed24.77s/two DBs/Mailpit/HTTP/SMTP/bootstrap; runtime health200, logs clean/fourtmpfs/no named mounts. |
+| 2026-10-23T16:12:09+05:00 | Down0withoutvolumes/diff clean,27tracked+8priornew files; old revisions/business/API/relay/sender/inbox/Compose/frontend unchanged, no commit/push. |
+
+Total331unique(186+124+21),0skips;17added regressions(9Core+8Notifications). Eight subprocess startup paths reject invalid DSNs/tokens before network while retaining field/cause/traceback but not fictitious secrets. Formatted errors/repr protection is not model_dump/errors()/environment collector sanitization. No broad exception suppression/new dependencies/schema changes; prior IDNA work retained. This diagnostic stage did not rerun the full fault-smoke scripts; the following backend readiness stage did.
+
+## Backend readiness before the UI stage
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-23T16:26:40+05:00 | Preserved27tracked+8new prior changes. Reread/rendered PDF1/2/9 via bundled pypdf/Poppler, original hash matched; pdftotext unavailable but PDF readable. No main access/commit/push. |
+| 2026-10-23T16:30:50+05:00 | Final isolated tmpfs build completed; removed unused Core SMTP declarations only after reference audit; Notifications SMTP unchanged. Docs separated mandatory UI/live/two-client evidence from extra service/token/version/IDNA choices. |
+| 2026-10-23T16:35:46+05:00 |186Core19.57s+124Notifications6.66s+21infrastructure22.15s,0skips; explicit test-only upgrade/downgradebase/upgrade/check and all static53/32/6formatted,33/18/6Mypy passed. Runtime pipeline exit0. |
+| 2026-10-23T16:36:55+05:00 | All four stores tmpfs/no named mounts/log failures; docs honest that UI/SSE/browser acceptance were still pending. |
+| 2026-10-23T16:39:52+05:00 | Core0004/24cols,13forwarded/4futurepending/1cancelled, no SMTP settings. Notifications0001/7cols/13sentfrozen/failed0; both schema checks/health good. Down0withoutvolumes; main untouched,29tracked+8new prior changes retained. |
+
+The API smoke covered create/list/detail, neutral IDN repeats, cancel/repeat/FIFO, resume/tail/stale generation, repeated/stale moves,401/422 including UTC extremes/NUL, concurrent200/409check-in, old ticket404, counts1/1/1 and post-start neutral202without insertion. Actual Mailpit delivered all active tasks including two reminders/two moves. Original CI outage/SIGKILL/commit-before-ACK/duplicate/conflict/auth and SMTP pause/DATA-loss/frozen-retry scenarios passed unchanged. Negative old-defect controls in disposable copies produced3Core-email,2Notifications-email,5Core-secret and4Notifications-secret expected failures; import/collection failures were not accepted as sensitivity.331unique tests and real faults were backend evidence, not a then-absent frontend. Remote Actions unrun.
+
+## Frontend and live SSE
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-23T19:55:44+05:00 | Clean HEADbef709c, user had committed prior work. Read actual API/services/access/frontend/PDF; authorized UI/SSE, preserved business rules. |
+| 2026-10-23T20:09:05+05:00 | Public EventView/server_time SSE and organizer key verification, SQL closed before yield; built real React screens with warm date rows/no invented fields or fake operations. |
+| 2026-10-23T20:18:02+05:00 | After Ruff/type-fixture fixes and replacing obsolete “SSE absent” assertion(187passed/1failed),188Core28.48s+124Notifications6.50s+21infra29.77s/check/static55/33passed. Tmpfs UI project ready at55052/Mailpit55051. |
+| 2026-10-23T20:19:24+05:00 | First actual Chrome1passed/3failed: two tests reloaded memory-only organizer key, fixed login at target route; real missing hashchange handling fixed fragment consumption/remount without token storage. Screenshots/CUA empty state reviewed, no overflow. |
+| 2026-10-23T20:26:23+05:00 |16Vitest/Prettier/tsc/Vite passed. Dev-only test/format dependencies; fixed formatter stops and slow private GET starvation without cancelling every heartbeat read.409refreshes real generation, malformedJSON/network errors remain honest. |
+| 2026-10-23T20:31:31+05:00 | E2E2passed/2failed; full business/mail path passed, but initial autofocus skipped skip-link and offline did not close SSE. Fixed focus/scroll and offline/online handling. |
+| 2026-10-23T20:34:07+05:00 | Stronger E2E checked actual emailed origin and exposed random port vs PUBLIC_APP_URL. Added guarded tmpfs overlay/start script, resolve origin before sender; only disposable old-origin test stores recreated, frozen MIME never rewritten. |
+| 2026-10-23T20:38:11+05:00 |4E2Epassed34.8s: real email origin/two clients/FIFO/resume/move/check-in/live/IDN/invalidtoken/keyboard/404/network409. Notifications32/16 and infrastructure6/6static passed. |
+| 2026-10-23T20:41:41+05:00 | Reviewed wide/narrow actual list/event/ticket/organizer/check-in; CUA empty/login/detail. Fixed preventScroll focus/scroll-to-top capture and used-ticket copy; removed unused old api/health.ts.16units/static/build passed. |
+| 2026-10-23T21:46:26+05:00 | Final script rebuild/start retained55056/publicorigin; docs updated, last browser check started. No continuous work history invented between observations. |
+| 2026-10-23T21:48:05+05:00 | E2E3passed/1failed: datetime-local omits zero seconds, fill rejected full form. dateInput now omits :00 when appropriate; added round-trip unit, timezone/business rules unchanged. |
+| 2026-10-23T21:50:05+05:00 |17units/format/tsc/Vite/rebuild and4E2E34.5s passed, one header/no overflow, port retained. |
+| 2026-10-23T21:51:08+05:00 | Extra runtime log check failed on asyncpg termination cancellation. Real cancellation regression reproduced1failed/2deselected; not ignored or suppressed. |
+| 2026-10-23T21:55:05+05:00 | Shield only short read/session cleanup, no scope across yield; existing pinned AnyIO4.15.1 declared direct. Strict cancellation branch/type checks fixed without ignore; static passed. |
+| 2026-10-23T21:56:45+05:00 | Final sequential backend/static/migration/browser/log pipeline started; no premature PASS claim. Old CUA stream closed, preview retained. |
+| 2026-10-23T22:02:04+05:00 | Pipeline exit0:189Core+124Notifications+21infra=334unique,no skips;17Vitest/tsc/Vite and4E2E35.3s. Collect-only confirmed189. Fresh logs/health200/cleanup/pool regression passed, tmpfs/no named stores; later changes documentation only. |
+
+Executed C=/tmp/maddevs-ui-compose static/full upgrade/test/check, frontend pinned Node24 formatting/Vitest/TypeScript/Vite and actual host Chrome through /tmp/maddevs-run-ui-e2e.py. New cancellation test failed on previous code then passed. Secrets never in browser storage/query/trace/video; successful operations never mocked. Actual screenshots under /tmp/maddevs-ui-visual were reviewed. At stage completion a disposable preview remained at55056/Mailpit55054 for user review; main installation unchanged. Cross-browser/full assistive-technology audit, clean handover, exact model metadata, essay and approved publication were still open then.
+
+## Server time, queue ownership and load:2026-10-24
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-24T13:35:22+05:00 | Clean HEADe64a564; inspected frontend/SSE/transactions/relay/sender/CI and created separate baseline/stages tmpfs projects. |
+| 2026-10-24T13:42:43+05:00 | Exploratory baseline200POST->200×202,10/190,45.72req/s,p502672.66ms/p954145.73ms,14lockwaiters,move1465.73ms,100SSE/8s530commits,duplicates/deadlocks0. Under other Docker activity; not controlled comparison or production proof. |
+| 2026-10-24T13:44:33+05:00 | Frontend17units/format/tsc/Vite and6ChromeE2E1.2m;±365day device-clock tests/cancel/resume/move/start/offline/reconnect. Actions use server_time/performance; unknown disabled, Core authoritative. |
+| 2026-10-24T14:29:20+05:00 | Recorded stage2/3 choices: reserved AUTOCOMMIT session mutex/watchdog for relay/sender, safe queue/failed-ID/age/heartbeat/manualretry. No leases/broker/tables/exactly-once. Tests cover other process, concurrent iteration, cancellation/restart and killed ownership connection/frozenMIME. |
+| 2026-10-24T18:03:11+05:00 | Continued after user message; two controlled old/current repetitions and2API/1000SSE all exit0. Preliminary both-version SSE errors from reusing POST pool fixed by fresh pool without retries or relaxed all-client requirement. |
+| 2026-10-24T18:12:14+05:00 | Added populated0005index round-trip/full-tablehash/index/24cols/check regression.196Corepassed25.62s; ticket/check-in/frozenpayload preserved, infrastructure10files static passed, old revisions untouched. |
+| 2026-10-24T18:13:39+05:00 | Stages runtime rebuilt/healthy; Core99forwarded/37pending/failed0/due0,Notifications99sent/failed0/due0. Heads0005/0001,5+9+10cols,health/page200, current screenshots and syntax reviewed. |
+| 2026-10-24T18:16:23+05:00 | Stages cleanup down withoutvolumes/ps empty; load projects trapped cleanup. Old user preview/main untouched. Old revision diff clean;42tracked+22new, no gitadd/commit/push. |
+
+Shared SSE queue1/per-event/process and last-listener cleanup replaced per-client reads. Private GET changes/reconnect plus10s fallback avoids merely moving the polling load. Added bounded public/organizer pages, two-index0005, three typed atomic reschedule SQL statements, rollback/query-budget tests, Nginx30r/s/burst1000/sharedSSE2000/trusted IP overwrite/process cap. Business READ COMMITTED/event-lock/FIFO stayed in PostgreSQL.
+
+CI retained old checks/fault probes and added tmpfs Playwright/edge/readiness/alwayscleanup, correct public origin between steps. Real local outage/kill/restart/lostHTTPACK/ID202/conflict409/auth401/pausedSMTP/lostDATA/frozenMIME/NAT/XFF/429passed. Linux-container/remote Actions not claimed; actual local browser was Chrome/Node24.
+
+Intermediate failures retained: overloaded concurrent functional/load runs yielded Core182pass/3fail/5errors and Notifications124pass/1fail; quiet corrected runs passed without increasing test deadlines. One rollback test patched a removed function and was adapted with assertions retained plus mid-SQL rollback coverage. Static type errors were fixed. Browser tests found real initial REST failure leaving the page stuck; SSE now recovers transport/503but not404. Clock boundary navigation was made deterministic using actual API timing, not sleeps. No skip/xfail/suppressed failures.
+
+Final stage checks:195Core32.18s before the added migration-only test, then19625.62s;128Notifications10.52s;21infra24.08s;18Vitest/tsc/Vite;9ChromeE2E43.0s. Ruff63/Mypy39Core,36/19Notifications,10/10infra passed. Full explicit test-only upgrade/downgradebase/upgrade/check both DBs and populated index/data checks passed. Total345Pytest,18unit,9E2E. Exact final commands are preserved in the original Git transcript; pipeline logs were /tmp/maddevs-final-core.log and /tmp/maddevs-phase4-*.
+
+Controlled load details and unmodified rawJSON/EXPLAIN remain docs/LOAD_TESTING.md and docs/load-results/2026-10-24.json. Before A/B:p95991.74/1167.20ms,move405.54/361.95ms,100SSE791/824commits/8s,400mail6.495/6.538s. After A/B:p951838.41/1036.31ms,move65.56/32.99ms,26/12commits,mail48.606/8.443s.2API/1000SSE:p951224.39ms,move77.27ms,34commits,mail9.129s. All recorded200×202,10/190,duplicates/deadlocks0,400forwarded/Mailpit400/failed0. The slow48.606s/maxdue93.297s outlier lacked ERROR/WARNING in the saved tail; its cause was not established. Speedup of registration/SMTP and production capacity was not claimed. Later audit below weakened the evidentiary status of the old probe's exit0; raw measurements were not rewritten.
+
+## Four audit corrections
+
+| Observation | Actual work and result |
+| --- | --- |
+| 2026-10-24T19:32:26+05:00 | Preserved42tracked+22new prior changes; created audit tmpfs project/.env.example/ordinary test roles, no main data. |
+| 2026-10-24T19:50:25+05:00 |11ChromeE2Epassed51.3s plus5pagination repeats12.9s; real CI HTTP/SMTP/edge probes passed. Added actual HTTP SSE lock_timeout/EOF/unlock/reconnect/update regression; final Core199passed31.65s. |
+| 2026-10-24T19:52:13+05:00 | Corrected strict probe2API/1000SSE exit0:200×202,10/190,600pending,1000active/9000valid messages/stale0/errors0/deadlocks0/duplicates0.400forwarded/Mailpit400/failed0,drain10.308s,maxdue23.458s. JSON/EXPLAIN retained, fresh project cleaned. |
+| 2026-10-24T20:08:29+05:00 | Final health/page200/aware time; workers healthy,Core47forwarded/28pending/failed0/due0,Notifications47sent/failed0/due0. Audit downwithoutvolumes/ps empty; old migration/diff checks clean, main/preview unchanged, no commit/push/deploy. |
+
+Negative controls before repair: failed SSE producer1failed/4deselected with a real SQL error and reconnect before old close; unchanged weak probe predicates8failed/2passed; clock indicator±year2failed and deliberately gated old pagination1failed. Logs /tmp/maddevs-audit-{sse,probe,clock,pagination}-before.log. They are expected sensitivity checks, not disabled normal tests.
+
+Root causes/fixes: retire dead LiveHub topic by identity before cleanup; require complete200×202/10–190/600pending/no duplicates/deadlocks/fresh valid expected-stateSSE and collect child errors; await actual page response/exact DOM IDs after a Promise barrier; replace Availability Date.now with serverNow/null and add page server_time/performance clock. UTCZ/+00offsets compare as one instant. Initial SQL failure, reconnect-before-close, real HTTP lock-timeout, device±year/start/offline and unsafe load results are covered without sleeps masking races. Existing schema/migrations/business/SMTPfreeze remain.
+
+Final audit:199Core31.65s+128Notifications8.64s+32infrastructure26.00s=359Pytest;22Vitest/3files/format/tsc/Vite;11ChromeE2E51.3s plus5pagination repetitions. Static/migration/Compose/health/HTTP/SMTP/edge checks all passed. The original command transcript specifies C=/tmp/maddevs-audit-compose and full explicit migration round-trips only on test DBs; logs /tmp/maddevs-audit-{core-final,notify-full,infra-full,frontend,runtime,e2e-full,pagination-repeat,load-strict}.log. Formatting/config mismatches were corrected and checks rerun, not skipped. Remote Actions/Linux-browser step remained unrun, production/long soak outside scope.
+
+
+## English submission review: 2026-10-26
+
+| Almaty clock observation | Actual work/result |
+| --- | --- |
+| 2026-10-26T02:32:17+05:00 | Began this task; Git was clean at dff7a3766075453d6987256ef6d92f45d77e7f0d. Inspected runtime references, Compose, source, tests and documents before editing. Root main.py was empty and unused; useAction.clear had no caller; the two EventList LoadState branches were identical. |
+| 2026-10-26T03:02:37+05:00 | Rechecked original PDF pages 1/2/9, rendered and inspected page 9; SHA256 remained 3b7934746efef38066c6164c68df93ee6a0175c7ac7af8472372537a609539d7. Remote origin/HEAD were verified against the actual GitHub repository. |
+| 2026-10-26T03:06:56+05:00 | Observed fresh-checkout build/start verification: local Git clone plus this task's uncommitted patch, no copied node_modules/.venv/dist, public example settings only, separate tmpfs project. This does not claim the changes have been published on GitHub. |
+| 2026-10-26T03:11:27+05:00 | Observed final clean-checkout runtime and browser runs complete with exit 0: all HTTP/SMTP/edge probes and 12 Chrome E2E tests, 49.5s. Reviewed the English desktop/mobile screenshots after actual data readiness. |
+| 2026-10-26T03:11:57+05:00 | Removed 26 permitted local cache/artifact paths, listed below. Existing backend/.venv, frontend/node_modules, .env and IDE settings were preserved. Root .venv did not exist. |
+
+These are recording points, not invented start/end times for individual commands. English translation covers current UI, API errors, newly rendered emails, tests and documentation. It does not rewrite stored descriptions, payloads or MIME. Deliberate IDN/EAI/non-English legacy fixtures remain. Historical documentation was translated and condensed with all 169 existing full development timestamps and all decision timestamps retained; the linked existing Git revision retains the original verbatim transcript. Added the separate 10-sentence reflection, explicitly AI-assisted.
+
+Cleanup removed the empty root main.py, unused returned clear property, and duplicate LoadState branch. No additional service modules, tests, migration sources, locks, bootstrap SQL or load measurements were removed. Architecture, business rules, database schema, API routes/status codes and immutable-message boundaries are unchanged. Textual error messages are intentionally English now. No dependency or migration changes were necessary.
+
+Screenshot capture now awaits a page-specific visible data locator and document fonts before checking overflow/capturing. A regression guards evaluation order; actual two-client E2E continues to use real business APIs and Mailpit. Added English date-format and legacy prepared-MIME byte-preservation regressions. The edge probe checks the English 429 response too.
+
+### Actual commands and results
+
+For these commands, `C` means `/tmp/maddevs-cleanup-compose`, a shell wrapper running from this repository with `COMPOSE_PROJECT_NAME=event-registration-relay-check-ui-cleanup-20261026`, `COMPOSE_ENV_FILES=.env.example`, `COMPOSE_PROFILES=test`, random published ports, and `docker compose -f compose.yaml -f compose.browser-test.yaml`. Only isolated `_test` databases are used by Pytest and explicit migration round trips.
 
 ```sh
-export COMPOSE_PROJECT_NAME=event-registration-bootstrap-check-20261022
-export COMPOSE_ENV_FILES=.env.example COMPOSE_PROFILES=test
-export POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0
-docker compose -f compose.yaml -f /tmp/maddevs-bootstrap-ci.override.yaml "$@"
+C config --quiet
+C build api test notifications notifications-test bootstrap-test frontend
+C run --rm test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py tests/integration/test_live.py && alembic upgrade head && alembic downgrade base && alembic upgrade head && alembic check && pytest && alembic check'
+C run --rm notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app && alembic upgrade head && alembic downgrade base && alembic upgrade head && alembic check && pytest && alembic check'
+C run --rm bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks && pytest -c /app/pyproject.toml /bootstrap-tests'
+docker run --rm -v /Users/billcarter/Documents/MadDevs/frontend:/app -w /app node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f sh -c 'npx prettier --write src tests e2e *.ts && npm run format:check && npm test && npm run build'
 ```
 
-Override только для этого прогона: db tmpfs=/var/lib/postgresql/data, mailpit tmpfs=/data, их volumes mounts сброшены; api/worker/migrate image=event-registration-bootstrap-check-core:local, notifications/notifications-migrate image=event-registration-bootstrap-check-notifications:local. Основные сервисы/БД и прежние volumes не использовались. Ни down --volumes, ни prune не выполнялись.
+| Check | Actual result |
+| --- | --- |
+| Core Ruff / formatting / Mypy | PASS; 63 formatted files, 39 typed source files |
+| Core Pytest on PostgreSQL | PASS; 199 tests, 28.54s |
+| Notifications Ruff / formatting / Mypy | PASS; 36 formatted files, 19 typed source files |
+| Notifications Pytest on PostgreSQL/Mailpit | PASS; 129 tests, 7.57s |
+| Infrastructure Ruff / formatting / Mypy | PASS; 11 files; rerun after the English edge assertion |
+| Infrastructure Pytest | PASS; 32 tests, 20.50s, including bootstrap repeat/isolation and load-probe regressions |
+| Total Python | PASS; 360 tests, none skipped/disabled |
+| Alembic, both services | PASS; explicit upgrade head / downgrade base / upgrade head / check, then post-Pytest check; existing populated migration regressions also passed |
+| Frontend | PASS; Prettier, 23 Vitest tests in 3 files, TypeScript and Vite production build |
+| Compose | PASS; config/build/start/health, repeated from a fresh local checkout with the patch applied |
+| Actual-browser E2E | PASS; 12 tests, first run 53.7s, final fresh-checkout run 49.5s, macOS Chrome with Node 24, en-GB locale |
+| HTTP/SMTP/edge CI scenarios | PASS; repeated against fresh-checkout services; see below |
 
-| Проверка | Реально выполненная команда | Итог |
-|---|---|---|
-| Compose config | `C config --quiet` (с теми же параметрами wrapper, до его создания) | PASS |
-| Build | `C build api test notifications notifications-test bootstrap-test frontend`; после исправления импортов `C build test bootstrap-test` | PASS |
-| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py'` | PASS; 41 отформатированный Python-файл, Mypy 26 файлов (приложение + изменённая фикстура) |
-| Core Pytest/Alembic | `C run --rm test` | PASS; 129/129, окончательно 10.43s, 0 skipped; внутри upgrade head, весь Pytest (включая downgrade/base/upgrade и data-preserving migration), check |
-| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS; 18 Python-файлов / 6 app-файлов Mypy |
-| Notifications Pytest/Alembic | `C run --rm notifications-test` | PASS; 25/25, 1.14s, 0 skipped; upgrade, migration round-trip в Pytest, check |
-| Bootstrap Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests && ruff format --check --config /app/pyproject.toml /bootstrap-tests && mypy --config-file /app/pyproject.toml /bootstrap-tests'` | PASS; 1 новый типизированный тестовый файл |
-| Repeat bootstrap | `C run --rm bootstrap-test` | PASS; 1/1, 2.68s; реальные скрипты и PostgreSQL, два повтора после заполнения обеих БД |
-| TypeScript/Vite | `docker build --target build -t event-registration-bootstrap-check-frontend-build:local frontend`; `docker run --rm --network none event-registration-bootstrap-check-frontend-build:local npm run build` | PASS; реально выполнены npm run typecheck (tsc --noEmit) и Vite, 17 modules, 1.53s |
-| Runtime startup | `C up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications` | PASS; оба migrate и bootstrap exit 0; API/Notifications/frontend/PostgreSQL/Mailpit healthy, worker Up |
-| Runtime Alembic | `C exec -T api alembic check`; `C exec -T notifications alembic check` | PASS; no new upgrade operations |
-| HTTP | `address=$(C port frontend 80)`; `curl --fail --silent --show-error --max-time 10 http://${address}/api/health` и `/api/events`; `C exec -T notifications python -c 'import json,urllib.request; response=urllib.request.urlopen("http://localhost:8000/health",timeout=5); body=json.load(response); assert response.status == 200 and body == {"status":"ok","database":"ready"},body; print("Notifications /health: HTTP 200",body)'` | PASS; Core health/events=200, Notifications health=200; health body status=ok/database=ready |
-| Core independence | `C stop notifications`; те же curl health/events; `C up --no-build --no-deps -d --wait --wait-timeout 60 notifications` | PASS; Core health/events=200 во время остановки Notifications |
-| Сохранность Core бизнес-кода и миграций/frontend | `git diff --exit-code -- backend/app backend/migrations frontend`; `git diff --check` | PASS; изменений этих tracked файлов нет |
+The initial formatting-fix command inside the non-root Core image could not write COPY-owned source (permission denied). Corrected the source through a scoped repository bind mount using `C run --rm --no-deps --user 0 -v /Users/billcarter/Documents/MadDevs/backend:/app test sh -c 'ruff format . && ruff check .'`, rebuilt, then ran the full checks above successfully. No check was weakened. Docker supplies locked Linux dependencies instead of using incompatible local Python packages.
 
-Итого: 155 тестов (129 Core + 25 Notifications + 1 bootstrap), ни один не отключён. Изменены только тестовая инфраструктура/фикстура, workflow и документация; SQL bootstrap, бизнес-схема и прежние миграции не менялись. Реальный удалённый GitHub Actions не запускался: выполнены локальные эквиваленты всех его проверок. Коммиты и push не выполнялись.
-
-Контроль завершения `2026-10-22T23:12:53+05:00`: docker inspect только db/test-db/mailpit нового проекта подтвердил tmpfs и 0 named volumes для каждого. `C ps --all` перед остановкой показал здоровые сервисы и успешно завершённые миграции. Выполнен `C down --remove-orphans`, exit 0: удалены только временные контейнеры/сеть, без --volumes. `git diff --stat` включает прежнюю незакоммиченную работу; новый infrastructure/tests/test_bootstrap.py остаётся untracked и в обычный diff --stat не входит. Основные файлы этого запроса: compose.yaml, .github/workflows/ci.yml, backend/tests/conftest.py, backend/Dockerfile, infrastructure/tests/test_bootstrap.py и документация.
-
-### Асинхронный HTTP relay и надёжный inbox Notifications — 2026-10-22
-
-Часовой пояс всех отметок — Asia/Almaty (UTC+05:00). Это реальные контрольные отметки, а не восстановленная задним числом история команд.
-
-- `2026-10-22T23:24:43+05:00`: проверены git status/diff (рабочее дерево чистое), Compose, предыдущие миграции, Core outbox/worker, Notifications, тесты и документация. Core worker был только DB probe; приёма заданий не было.
-- `2026-10-22T23:29:10+05:00`: добавлены v1 DTO, async HTTP relay, commit-before-ACK inbox и новая Core revision 0003_outbox_forwarded. Существующие бизнес-сервисы/API/outbox scheduling не менялись. httpx 0.28.1 перенесён из dev в runtime; lock-файлы пересобраны pip-compile, dev с constraint=requirements.lock, без изменения закреплённых версий.
-- `2026-10-22T23:33:23+05:00`: исходники проходят Core strict Mypy; созданы PostgreSQL/API regression-тесты, схема JSON v1 и отдельный тестовый Compose-проект.
-- `2026-10-22T23:36:12+05:00`: Notifications 48/48. Первый Core upgrade выявил повторное применение naming convention к имени CHECK; исправлена только новая 0003 через op.f. Старые миграции не редактировались, PostgreSQL откатил неуспешный DDL. Далее Core 149/149, затем добавлена отдельная проверка data-preserving 0003/downgrade guard.
-- `2026-10-22T23:43:59+05:00`: пройдены реальные HTTP-проверки отказа Notifications и восстановления после SIGKILL relay; concurrent duplicate=202, conflict=409, no token=401. Реальный TCP proxy разорвал ответ после Notifications commit: Core остался pending, после рестарта получателя/relay повтор завершился forwarded. Введён общий asyncio deadline сверх phase timeouts httpx.
-- `2026-10-22T23:48:01+05:00`: Core 152/152, включая deadline и crash после prepare до HTTP; статические проверки Core/Notifications проходят. Подготовлены контракт/правила исторических снимков и обновлены README/архитектура. Затем ISO-валидация v1 усилена запретом числовых дат, чтобы соответствовать JSON Schema.
-- `2026-10-22T23:53:58+05:00`: окончательный Core 152/152 (28.09s), Ruff/format/Mypy Core/Notifications/infrastructure успешны; повторён реальный smoke на окончательных образах.
-- `2026-10-22T23:55:54+05:00`: Notifications 52/52 (1.30s), infrastructure 3/3 (3.88s), без skips. Проверены реальные PostgreSQL: Core 24 колонки, 4 forwarded + 4 будущих reminder pending, sent=0; Notifications 7 колонок, ровно 4 unique jobs, все pending/mime=NULL/attempts=0. Обе runtime-схемы прошли alembic check.
-
-Временные статические ошибки также исправлены: Ruff импортов/форматирование; Mypy внешнего source namespace Notifications устранён явным MYPYPATH только для инфраструктурного тестового контейнера, без ignore. Дополнительных платных сервисов, Redis/Kafka/Celery, leases, SMTP или новых экранов нет.
-
-#### Изменённые компоненты
-
-| Файл / основные функции | Что изменено и зачем |
-|---|---|
-| backend/app/notifications/relay.py — Relay.prepare/run_once/finish/backoff | Один async relay, event-lock и fresh reads; freeze до HTTP; отсутствие DB-транзакции во время сети; устойчивые retry/limit/backoff; валидация ACK; forwarded вместо sent |
-| backend/app/notifications/contract.py; notifications/notifications_app/contract.py | Независимые DTO одного JSON v1: ID, тип, версии/поколения, ISO UTC, ограничения и безопасные поля; артефакт docs/notification-contract-v1.schema.json фиксируется контрактным тестом |
-| backend/app/worker.py — run | Реальный последовательный relay с AsyncClient, завершением по сигналу и безопасной диагностикой; SMTP не вызывается |
-| backend/app/db/models.py; backend/migrations/versions/0003_outbox_forwarded.py | Состояние forwarded и два CHECK, без новых колонок/переписывания строк; downgrade запрещён, если потеряет accepted-состояние |
-| notifications/notifications_app/inbox.py — accept_message | INSERT ON CONFLICT DO NOTHING + отдельный READ COMMITTED SELECT; сравнение JSON; commit до возврата; неизменность уже принятого job |
-| notifications/notifications_app/api.py; main.py | Защищённый POST /internal/v1/notifications, 202/409/401, 422 без исходного payload/секретов; собственная DB/session factory |
-| backend/app/config.py; notifications/notifications_app/config.py; .env.example; compose.yaml | Общий внутренний секрет только relay/Notifications; timeout/retry settings, тестовые mount/path; worker больше не зависит от Mailpit; API не зависит от Notifications |
-| backend/pyproject.toml; requirements*.lock | httpx runtime с прежней закреплённой версией; одинаковая сортировка импортов app в разных test-контекстах |
-| backend/tests/integration/test_relay.py; test_relay_migration.py | 22 сценария relay + миграция/запрет потери forwarded; все прежние Core tests сохранены |
-| notifications/tests/integration/test_inbox.py; tests/unit/test_config.py; tests/conftest.py | Commit-before-ACK, конкурентные дубликаты/конфликты, auth/валидация, loss-after-commit и restart, исторические версии; секрет для fixtures |
-| infrastructure/tests/test_notification_contract.py; test_relay_delivery.py; test_bootstrap.py | Контракт обеих DTO, сквозной потерянный ACK с двумя БД и новыми компонентами, прежний повторный bootstrap с новыми auth-настройками миграций |
-| infrastructure/checks/relay_smoke.py; .github/workflows/ci.yml | Реальные HTTP/TCP отказы и рестарты в CI, без Docker socket в сервисах; отдельные lint/format/strict Mypy сценария |
-| README.md; ARCHITECTURE.md; DECISIONS.md; docs/NOTIFICATION_PROTOCOL.md; docs/NOTIFICATIONS_INFRASTRUCTURE.md; docs/WORKER_EVOLUTION.md | Фактическая готовность, контракт v1, исторические снимки, failed/manual retry, различие HTTP/SMTP, будущий конкурентный worker |
-
-#### Выполненные проверки
-
-Ниже `C` означает реальный wrapper `/tmp/maddevs-relay-compose`:
+Fresh checkout verification used `git clone --local --no-hardlinks /Users/billcarter/Documents/MadDevs /tmp/maddevs-submission-check-20261026`, applied `git diff --binary`, copied the new ESSAY.md and public .env.example, and ran:
 
 ```sh
-export COMPOSE_PROJECT_NAME=event-registration-relay-check-20261022
-export COMPOSE_ENV_FILES=.env.example COMPOSE_PROFILES=test
-export POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0
-docker compose -f compose.yaml -f /tmp/maddevs-relay-ci.override.yaml "$@"
+BROWSER_TEST_PROJECT=event-registration-relay-check-ui-cleanclone-20261026 scripts/browser-test.sh start
+bash /tmp/maddevs-phase4-runtime-body.sh
+python3 /tmp/maddevs-cleanclone-e2e.py
 ```
 
-Override: db и mailpit volumes mounts сброшены `!reset []`, вместо них tmpfs (/var/lib/postgresql/data и /data). Собственные теги Core/Notifications — event-registration-relay-check-core:local / event-registration-relay-check-notifications:local. Для ускорения реального smoke только в локальном override worker_poll_interval=0.2, retry cap=10/max_attempts=20; обычные defaults 5/60/8 зафиксированы в Settings. test-db из основного Compose уже использует tmpfs. Основная установка не использовалась.
-
-| Проверка | Реальная команда | Фактический итог |
-|---|---|---|
-| Compose | `C config --quiet` | PASS |
-| Build | `C build api test notifications notifications-test bootstrap-test frontend`; финально повторены изменённые backend/test images | PASS |
-| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py'` | PASS; 46 Python-файлов / 28 Mypy source files |
-| Все Core tests + migrations | `C run --rm test` | PASS; 152/152, 28.09s; upgrade head, полный Pytest, check; внутри round-trip base/0001/0002/head и guarded downgrade 0003 |
-| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS; 22 Python-файла / 9 Mypy source files |
-| Все Notifications tests + migrations | `C run --rm notifications-test` | PASS; 52/52, 1.30s; upgrade, round-trip и check |
-| Infrastructure Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS; все 4 Python-файла |
-| Bootstrap/contract/two-DB delivery | `C run --rm bootstrap-test` | PASS; 3/3, 3.88s; повторный bootstrap и существующие данные/права, общий контракт, loss-after-commit на двух БД |
-| Полный runtime | `C up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications`; после финальных rebuild `C up --no-build --no-deps -d --wait --wait-timeout 60 api worker notifications` | PASS |
-| Runtime migrations | `C exec -T api alembic check`; `C exec -T notifications alembic check` | PASS; no new upgrade operations |
-| Real HTTP/TCP smoke | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-20261022 worker python - PHASE < infrastructure/checks/relay_smoke.py` с фазами create/outage/recover/lost-response/recover и командами stop/kill/up/restart, как в workflow | PASS; повторён полностью после финальной сборки; Core 201/202 при outage, durable retry/SIGKILL, concurrent 202, conflict409, unauthorized401, TCP loss после commit и restart обоих процессов |
-| Собственные DB-снимки runtime | `C exec -T api python -` и `C exec -T notifications python -` с SQL SELECT information_schema.columns / статусов outbox / job status,mime,attempts | PASS; Core 24 колонки и 0 sent; Notifications 7 колонок/4 unique jobs, SMTP не начат |
-| HTTP health | `address=$(C port frontend 80)`; `curl --fail --silent --show-error --retry 5 --retry-connrefused --retry-delay 2 --max-time 10 http://${address}/api/health`; `C exec -T notifications python -c 'import json,urllib.request; response=urllib.request.urlopen("http://localhost:8000/health",timeout=5); body=json.load(response); assert response.status==200 and body=={"status":"ok","database":"ready"}; print("Notifications: HTTP 200",body)'` | PASS; оба HTTP 200, status=ok/database=ready |
-| Сохранность бизнес-кода/старых миграций/frontend | `git diff --exit-code -- backend/app/services backend/app/api backend/app/notifications/outbox.py backend/migrations/versions/0001_initial_schema.py backend/migrations/versions/0002_simplify_schema.py notifications/migrations frontend`; `git diff --check` | PASS; нет изменений этих файлов/ошибок diff |
-
-Итого **207 Pytest-тестов, 0 skipped** (152 Core + 52 Notifications + 3 infrastructure) и отдельный реальный HTTP/TCP smoke. Новые состояния/колонки не выдаются за SMTP-доставку: Core forwarded означает только durable acceptance, Notifications пока ничего не отправляет. После 8 default попыток failed требует явного retry с прежним ID/JSON; задания не удаляются. Prepared снимок может исторически устареть, поскольку после неизвестного HTTP-исхода его нельзя переписать. Нет распределённого singleton/leases и SMTP exactly-once.
-
-Удалённый GitHub Actions не запускался, push/коммит не выполнялись. Выполнены локальные проверки, включая новый сетевой CI-шаг. Подробный протокол/правила обновления версии и безопасного retry — docs/NOTIFICATION_PROTOCOL.md.
-
-Контроль завершения `2026-10-22T23:58:48+05:00`: оба health вернули HTTP 200, финальный git diff --check успешен. docker inspect подтвердил только tmpfs/0 named volumes у db/test-db/mailpit проекта event-registration-relay-check-20261022. Выполнен `C down --remove-orphans`, exit 0, без --volumes: временные контейнеры и сеть удалены. Основная БД/volumes не использовались. Git diff --stat показан; он не включает 14 новых untracked файлов. Никаких commit/push не выполнялось.
-
-
-### Head-of-line blocking Core relay — 2026-10-23
-
-Все временные отметки ниже — реальные контрольные чтения часов, Asia/Almaty (UTC+05:00).
-
-- `2026-10-23T08:38:01+05:00`: проверены git status/diff и актуальные relay/worker/тесты. В дереве уже были 20 изменённых tracked и 14 untracked путей предыдущего этапа HTTP relay; они сохранены, история не переписывалась.
-- `2026-10-23T08:44:13+05:00`: добавлена ограниченная выборка голов разных событий, UUID-курсор/cutoff и NOWAIT; 55P03 обрабатывается после rollback отдельной prepare-транзакции. Другие DB-ошибки распространяются. Схема/API/FIFO не менялись.
-- `2026-10-23T08:50:07+05:00`: начата сборка отдельного Compose-проекта event-registration-relay-check-hol-20261023: свои image tags, db/test-db/mailpit в tmpfs, случайные порты, без основных volumes.
-- `2026-10-23T08:54:32+05:00`: первоначальный полный Core 160/160; запущены остальные наборы и отрицательный контроль старого алгоритма.
-- `2026-10-23T08:57:46+05:00`: Notifications 52/52, infrastructure 3/3; 8 новых PostgreSQL регрессий проходят. Старая выборка, временно подставленная только read-only mount тестового контейнера, ожидаемо провалила регрессию по TimeoutError (1.68s); рабочий исходник не заменялся. Затем повторены все 8 тестов с новой реализацией: PASS.
-- `2026-10-23T09:00:57+05:00`: на реальных сервисах при PostgreSQL lock A уведомление B forwarded; после unlock A также forwarded. Затем запущен полный прежний сетевой CI smoke отказа/рестартов/потерянного ACK.
-- `2026-10-23T09:02:39+05:00`: реальный HTTP/TCP smoke завершился успешно. Расширенный strict Mypy нового тестового модуля обнаружил два nullable-обращения в импортируемом прежнем test_relay.py; добавлен assert row is not None, без suppressions/отключения проверок.
-- `2026-10-23T09:04:36+05:00`: окончательные Core 160/160 (16.52s), Core Ruff/format/strict Mypy успешны; runtime Alembic check обеих БД без новых операций.
-- `2026-10-23T09:06:53+05:00`: проверены окончательные diff/status, настройки Compose и документация; результаты внесены в журнал решений.
-
-#### Изменения этого исправления
-
-| Файл / основные функции | Изменение |
-|---|---|
-| backend/app/notifications/relay.py — Relay._candidates/prepare/run_once/_deliver | DISTINCT ON event heads, конечный обход с cutoff/курсором, ограниченная страница; NOWAIT и безопасный skip 55P03 после rollback; прежний HTTP-код выделен в _deliver |
-| backend/app/config.py — Settings; .env.example; compose.yaml | RELAY_CANDIDATE_LIMIT=20 с ограничением 1–100 и передачей в worker |
-| backend/tests/integration/test_relay_blocking.py | 8 новых сценариев: pending/prepared, несколько писем события, несколько занятых страниц, настоящий lock_timeout/rollback, другие ошибки БД, новые сообщения/idle/restart |
-| backend/tests/integration/test_relay.py | Явная проверка существования DB-строки перед доступом к полям в прежнем тесте |
-| .github/workflows/ci.yml | Новый регрессионный модуль добавлен к strict Mypy Core |
-| README.md; ARCHITECTURE.md; docs/NOTIFICATION_PROTOCOL.md; DECISIONS.md; DEVELOPMENT_LOG.md | Реальная схема обхода, пределы справедливости/задержки, настройки и результаты |
-
-#### Фактически выполненные проверки
-
-Здесь C = `/tmp/maddevs-hol-compose`, wrapper для `docker compose -f compose.yaml -f /tmp/maddevs-hol-ci.override.yaml` с COMPOSE_PROJECT_NAME=event-registration-relay-check-hol-20261023, COMPOSE_ENV_FILES=.env.example, COMPOSE_PROFILES=test, POSTGRES_PORT/FRONTEND_PORT/MAILPIT_PORT=0. Override удаляет volume mounts db/mailpit через !reset [], использует tmpfs и отдельные image tags event-registration-hol-check-core:local / event-registration-hol-check-notifications:local. Только в тестовом worker poll=0.2, backoff cap=10/max attempts=20 для сетевого smoke.
-
-| Проверка | Реальная команда | Результат |
-|---|---|---|
-| Compose | `C config --quiet` | PASS, в том числе после окончательных настроек |
-| Сборка | `C build api test notifications notifications-test bootstrap-test frontend`; затем `C build test` после финальных тестовых правок | PASS |
-| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py'` | PASS, 47 formatted files / 29 Mypy source files |
-| Полный Core Pytest/Alembic | `C run --rm test` | PASS, 160 passed, 16.52s; upgrade/check и миграционные round-trip/downgrade guard |
-| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS, 22 formatted files / 9 Mypy source files |
-| Полный Notifications Pytest/Alembic | `C run --rm notifications-test` | PASS, 52 passed, 3.81s; upgrade/check/round-trip |
-| Infrastructure Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS, 4 source files |
-| Bootstrap/контракт/две БД | `C run --rm bootstrap-test` | PASS, 3 passed, 5.75s, повторный bootstrap/владельцы/права/изоляция/сохранность данных |
-| Только новые регрессии | `C run --rm --no-deps test pytest -q tests/integration/test_relay_blocking.py` | PASS, 8 passed, 0.90s; затем входят в окончательные 160 |
-| Frontend TypeScript/Vite | `docker build --target build -t event-registration-hol-check-frontend-build:local frontend`; `docker run --rm --network none event-registration-hol-check-frontend-build:local npm run build` | PASS, tsc --noEmit и Vite (17 modules) |
-| Runtime startup | `C up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications` | PASS, migrations/bootstrap exit 0; все healthchecks успешны |
-| Runtime Alembic | `C exec -T api alembic check`; `C exec -T notifications alembic check` | PASS, no new upgrade operations |
-| Реальный HOL HTTP | `C stop worker`; `C run --rm --no-deps -T worker python - < /tmp/maddevs-hol-real.py`; `C up --no-deps -d worker` | PASS, занятое A unchanged/pending, независимое B forwarded; после unlock A forwarded с attempts=1 |
-| Реальный CI HTTP/TCP smoke | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-hol-20261023 worker python - PHASE < infrastructure/checks/relay_smoke.py` | PASS, фазы create/outage/recover/lost-response/recover: остановка Notifications, SIGKILL relay, рестарт, настоящий разрыв ACK после commit, concurrent duplicate202/conflict409/auth401 |
-| Health и независимость Core | curl `/api/health` через `C port frontend 80`; HTTP `/health` внутри Notifications; при остановленном Notifications также Core health/events | PASS, HTTP 200; Core create/register=201/202 при outage |
-| Сохранность бизнес-кода/миграций/frontend | `git diff --exit-code -- backend/app/services backend/app/api backend/app/notifications/outbox.py backend/migrations/versions/0001_initial_schema.py backend/migrations/versions/0002_simplify_schema.py notifications/migrations frontend`; `git diff --check` | PASS |
-
-Итого **215 Pytest-тестов, 0 skipped** (160 Core + 52 Notifications + 3 infrastructure), плюс реальные сетевые проверки. Отрицательный контроль старого алгоритма — отдельный ожидаемый FAIL; окончательная реализация проходит весь набор. Тесты не отключались. HTTP idempotency/prepared payload/версии и поведение при рестарте проверены прежними и новыми тестами. Новых миграций/колонок, изменений контрактов/участников FIFO нет.
-
-Ограничение: сохраняется один relay. Глобальный приоритет старейшего письма между разными событиями заменён UUID round-robin; внутри события выбирается прежняя голова среди ready по available_at/id. Полностью занятая страница даёт паузу poll_interval перед следующей, поэтому большой занятый набор увеличивает задержку, но курсор не возвращает постоянно только первый префикс. Новые поступления за cutoff ждут следующего обхода. SMTP не реализован этим исправлением. Удалённый GitHub Actions не запускался; выполнены его локальные проверки. Commit/push не выполнялись.
-
-Контроль завершения `2026-10-23T09:08:44+05:00`: docker inspect подтвердил tmpfs и отсутствие named volume mounts у db/test-db/mailpit только тестового проекта. `C down --remove-orphans` завершился exit 0 без --volumes; удалены временные контейнеры/сеть. Основная БД и volumes не использовались. `git diff --check` успешен; `git diff --stat` показан (включает прежнюю незакоммиченную работу и не учитывает 15 untracked файлов). Новых commit/push нет.
-
-
-### Повторная независимая проверка исправления — 2026-10-23
-
-- `2026-10-23T09:11:41+05:00`: по просьбе пользователя повторно проверены git status/diff, актуальные relay/worker, PostgreSQL-настройки, регрессионные тесты и CI. Существующее dirty tree сохранено. Прикладной код не изменялся.
-- `2026-10-23T09:12:59+05:00`: заново собраны api/test/notifications/notifications-test/bootstrap-test/frontend через прежний изолированный wrapper C=/tmp/maddevs-hol-compose. Полный `C run --rm test`: **160 passed (13.58s)**, Alembic check без операций; проходят миграционные round-trip и downgrade guards, конкурентные API-процессы, FIFO, cancel/resume/checkin и все relay tests. Core Ruff/format/Mypy: PASS (47/29 файлов).
-- `2026-10-23T09:13:41+05:00`: `C run --rm notifications-test`: **52 passed (1.18s)**, Alembic check успешен; `C run --rm bootstrap-test`: **3 passed (3.99s)**. Notifications Ruff/format/Mypy PASS (22/9), infrastructure PASS (4 файла). Статические команды совпадают с таблицей предыдущего исправления; Core Mypy включает tests/integration/test_relay_blocking.py. `docker run --rm --network none event-registration-hol-check-frontend-build:local npm run build`: tsc/Vite PASS. Полный Compose startup с --wait успешен.
-- `2026-10-23T09:13:41+05:00`: повторён реальный HOL через `C stop worker`, `C run --rm --no-deps -T worker python - < /tmp/maddevs-hol-real.py`, затем запуск worker. Под lock A остаётся pending/attempts=0/prepared=NULL, B forwarded; после unlock A forwarded/attempts=1.
-- `2026-10-23T09:14:23+05:00`: весь реальный HTTP/TCP smoke CI снова PASS: create/outage/recover/lost-response/recover, остановка Notifications, Core health/events=200 и create/register=201/202 при outage, SIGKILL relay, рестарты, loss-after-commit, duplicate202/conflict409/auth401. Выполнен прежней командой worker python - PHASE с RELAY_SMOKE_PROJECT=event-registration-relay-check-hol-20261023 и infrastructure/checks/relay_smoke.py.
-- `2026-10-23T09:15:19+05:00`: `C run --rm --no-deps test sh -c 'for pass in 1 2 3 4 5; do pytest -q tests/integration/test_relay_blocking.py tests/integration/test_api_processes.py || exit; done'`: **5 × 10 passed**, времена 4.15/4.21/4.13/4.43/3.62s. Это повторение уже включённых в 215 тестов, не дополнительные уникальные тесты. Runtime `C exec -T api alembic check` и Notifications аналог: PASS. Core outbox SELECT: 4 forwarded + 4 будущих pending, нет failed/sent. HTTP health обоих сервисов и frontend proxy=200; HTML/JS/CSS=200; Mailpit=200/0 писем. Все 7 тестовых контейнеров running, все имеющиеся healthchecks healthy, worker logs без Relay iteration failed. docker inspect подтвердил tmpfs/отсутствие named mounts у db/test-db/mailpit.
-- `2026-10-23T09:15:38+05:00`: собственный SELECT Notifications подтвердил ровно 4 уникальных задания, все pending/mime=NULL/attempts=0. В первом одноразовом проверочном скрипте был ошибочный импорт notifications_app.db.models; после исправления импорта на notifications_app.models/db скрипт прошёл. Это ошибка проверочного скрипта, исходники сервиса не менялись.
-
-Вывод проверки: исходный HOL-дефект не воспроизводится; новых сбоев в проверенных сценариях не найдено. **215/215 уникальных Pytest-тестов, 0 skips**, дополнительно 50 повторных выполнений конкурентных тестов. Текущий алгоритм ограничивает попытки prepare за проход, выбирает одну ready-голову на событие по available_at/id, делает полный rollback перед skip55P03, сохраняет курсор до следующего poll и возвращается к занятым событиям. Prepared JSON/ID, API и бизнес-правила не менялись. Глобальная сортировка между независимыми событиями по-прежнему заменена UUID round-robin; строгая доставка всех писем по порядку после backoff не обещается. Проект ещё не завершён целиком: SMTP/MIME sender, SSE и полноценные пользовательские экраны отсутствуют согласно текущему этапу. Удалённый GitHub Actions не запускался. Из файлов проекта в этой проверке изменён только этот журнал; commit/push не выполнялись.
-
-Завершение повторной проверки `2026-10-23T09:16:26+05:00`: `C down --remove-orphans` exit 0, без --volumes; временные контейнеры/сеть удалены. Основная установка не затронута. git diff --check успешен, git diff --stat показан.
-
-
-### SMTP sender Notifications — 2026-10-23
-
-Время — реальные контрольные чтения часов Asia/Almaty (UTC+05:00), не придуманная история.
-
-- `2026-10-23T09:39:07+05:00`: проверены git status/diff (чисто, HEAD c4215d3), Core outbox/relay, Notifications inbox/семь колонок, миграции, тесты/CI. Пользователь разрешил только SMTP-этап, без UI/SSE. Прежний v1-контракт исторических снимков сохранён.
-- `2026-10-23T09:42:50+05:00`: реализованы MIME renderer/load, async SMTP adapter и prepare/SMTP/finish sender. MIME/попытка/backoff коммитятся до сети. Первая pip-compile команда остановилась из-за недоступного каталога cache вне workspace; повтор с /tmp cache успешен, добавлен только aiosmtplib==5.1.3, остальные pins сохранены.
-- `2026-10-23T09:44:52+05:00`: настройки, отдельный worker/CLI retry, Compose notifications-sender/test-mailpit и новые тесты подготовлены; strict Mypy исходников успешен. Проверены официальные aiosmtplib raw send/sendmail/error docs и Mailpit runtime options; ссылки сохранены в SMTP_DELIVERY.md.
-- `2026-10-23T09:47:53+05:00`: отдельные образы собраны; полный Core **160 passed (10.73s)** и Alembic check. Основные DB/volumes не используются.
-- `2026-10-23T09:48:28+05:00`: первый Notifications прогон 89 passed/3 failed: один настоящий дефект обработки HeaderParseError для a@, два ошибочных async-with pytest.raises в новых тестах. Исправлены нормализация исключения в mailbox и контекстные менеджеры тестов. Первый infrastructure прогон 8 passed/1 failed: тест искал билет в сырых quoted-printable bytes; исправлен на декодированное MIME-содержимое. Падающие проверки не отключались.
-- `2026-10-23T09:50:22+05:00`: Notifications **92/92**, реальные SMTP 4xx/5xx/disconnect/timeout, Mailpit duplicate, restart/MIME/бюджет и защиты replay успешны. Постоянные SMTP ошибки сохраняются failed, временные pending с backoff; нет исключений/адресов/токенов в last_error/logging.
-- `2026-10-23T09:52:08+05:00`: сохранён и выполнен прежний реальный HTTP relay smoke: outage, SIGKILL, recovery, concurrent202/conflict409/auth401, настоящий lost ACK после commit и рестарты. Новые сквозные тесты используют обе обычные DB-роли и реальный test-mailpit; сроки/cancel/resume/reschedule проверяются бизнес-сервисами Core.
-- `2026-10-23T09:53:11+05:00`: **11 infrastructure tests passed (18.16s)**. Новый реальный SMTP CI smoke прошёл: Mailpit pause → pending/MIME/attempts, SIGKILL sender → unpause/restart → sent; затем SMTP TCP proxy передал DATA в реальный Mailpit и потерял ответ. После рестарта прежний MIME повторён, сохранена одна Mailpit-копия. Все четыре runtime письма совпали с MIME в БД по заголовкам и декодированному телу.
-- `2026-10-23T09:57:40+05:00`: настоящий subprocess CLI retry проверен: без --acknowledge-duplicate-risk отказ, один failed реактивируется без изменения ID/JSON/MIME, повтор не сбрасывает pending. Полные Notifications **93 passed (4.28s)**. Frontend tsc/Vite PASS; UI не изменялся.
-- `2026-10-23T09:58:48+05:00`: runtime SELECT подтвердил Core 24 колонки, 4 forwarded + 4 будущих reminder pending; Notifications 7 колонок, 4 sent со всеми MIME. Runtime alembic check обоих сервисов PASS. Девять временных сервисов running, все имеющиеся healthchecks healthy; worker/sender без неожиданных iteration errors. db/test-db/mailpit/test-mailpit только tmpfs, без named volume mounts. Core proxy health и Notifications health HTTP 200.
-- `2026-10-23T09:59:38+05:00`: Settings.hide_input_in_errors добавлен вместе с регрессией, чтобы startup traceback при ошибочной настройке не содержал адресов/токена. Пересобраны окончательные Notifications images; публичный HTTP-контракт, бизнес-сервисы и миграции не менялись.
-- `2026-10-23T10:01:26+05:00`: окончательные Notifications **94 passed (4.03s)**, Ruff/format/Mypy PASS (31/15 файлов). Финальные API/sender запущены с новым образом, SMTP recover подтвердил сохранность четырёх sent/MIME/писем. Повторный полный infrastructure прогон запущен после окончательного изменения Settings.
-
-#### Файлы и назначение
-
-| Файл / функции | Изменение |
-|---|---|
-| notifications/notifications_app/mime.py — PreparedEmail, mailbox, render, load_prepared | Четыре plain-text шаблона, безопасный SMTP envelope, стабильные From/To/Date/Message-ID, загрузка прежних bytes; repr без PII |
-| notifications/notifications_app/smtp.py — send_email | aiosmtplib connect/sendmail/close, bytes без ресериализации, local_hostname без getfqdn, локальный Mailpit без внешних аккаунтов |
-| notifications/notifications_app/sender.py — Sender.prepare/run_once/finish/backoff | Due-выборка, короткий row-lock/commit до SMTP, один общий deadline, устойчивый retry/budget/failed/sent; DB не удерживается во время сети |
-| notifications/notifications_app/worker.py — run; clock.py | Один процесс, async sleep, сигналы/завершение/health собственной схемы, logging только класса ошибки |
-| notifications/notifications_app/retry.py — retry_failed/main | CLI targeted retry только failed, явное принятие риска, без изменения MIME/payload/ID, не оживляет pending/sent/invalid |
-| notifications/notifications_app/config.py; models.py | Настройки SMTP/сроков/бюджета, валидация sender/public origin, скрытие ошибочного input; в модели изменён только устаревший комментарий, схема прежняя |
-| notifications/pyproject.toml; requirements*.lock | Единственная новая runtime зависимость aiosmtplib 5.1.3; прежние версии не обновлены |
-| notifications/tests/integration/test_sender.py; test_smtp.py; tests/unit/test_mime.py; test_config.py | Постоянство MIME/бюджет/crash/CLI/replay/нет DB-транзакции, реальные TCP SMTP ошибки и Mailpit, все виды писем/безопасность адресов и диагностики |
-| infrastructure/tests/test_email_delivery.py | Core cancel/resume/переносы/−24h → HTTP inbox → MIME → реальный Mailpit, до/после обеих границ и retry после бизнес-изменения |
-| infrastructure/checks/smtp_smoke.py; .github/workflows/ci.yml | Настоящие SMTP outage/SIGKILL/lost DATA ACK/restart в CI; cleanup размораживает paused Mailpit даже при ошибке проверки |
-| compose.yaml; .env.example | Один notifications-sender с собственной ролью, тестовый Mailpit tmpfs, SMTP/settings, quiet Mailpit; обе миграции прежние |
-| backend/Dockerfile | Только bootstrap-test target получает Notifications runtime lock через additional build context; Core runtime/test не получают SMTP-зависимость |
-| backend/app/worker.py | Исправлена только устаревшая стартовая фраза: SMTP теперь принадлежит Notifications |
-| README.md; ARCHITECTURE.md; DECISIONS.md; DEVELOPMENT_LOG.md; docs/SMTP_DELIVERY.md; NOTIFICATION_PROTOCOL.md; NOTIFICATIONS_INFRASTRUCTURE.md; WORKER_EVOLUTION.md | Фактическая готовность, две границы/исторические версии, расписание, команды retry, риск SMTP дубля/пределы Mailpit, будущий параллелизм |
-
-#### Команды и результаты
-
-`C` = реальный wrapper `/tmp/maddevs-smtp-compose`, выполняющий `docker compose -f compose.yaml -f /tmp/maddevs-smtp-ci.override.yaml` с COMPOSE_PROJECT_NAME=event-registration-relay-check-smtp-20261023, COMPOSE_ENV_FILES=.env.example, COMPOSE_PROFILES=test и всеми опубликованными портами=0. Override сбрасывает named mounts db/mailpit и заменяет их tmpfs; test-db/test-mailpit уже tmpfs. Собственные теги Core/Notifications event-registration-smtp-check-core:local / event-registration-smtp-check-notifications:local. Временный worker poll=0.2, relay cap=10/max attempts=20; временный sender poll=0.2/cap=2/max attempts=20 только для ускорения сетевых отказов. Обычные defaults 5/60/8 не изменены.
-
-| Проверка | Реальная команда | Итог |
-|---|---|---|
-| Compose config/build | `C config --quiet`; `C build api test notifications notifications-test bootstrap-test frontend`; после исправлений повторены Notifications/runtime/test images | PASS |
-| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py'` | PASS, 47 formatted / 29 Mypy files |
-| Полный Core/Alembic | `C run --rm test` | PASS, 160 passed, 10.73s, upgrade/round-trip/downgrade guards/check |
-| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS, 31 formatted / 15 Mypy files, повторено на финальном образе |
-| Полный Notifications/Alembic | `C run --rm notifications-test` | PASS, окончательные 94 passed, 4.03s, upgrade/round-trip/guard/check |
-| Infrastructure Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS, все 6 файлов |
-| Полный infrastructure | `C run --rm bootstrap-test` | PASS, 11 passed, 18.16s до последнего изменения диагностики; окончательное повторение зафиксировано ниже |
-| Frontend | `C build frontend`; `docker run --rm --network none event-registration-hol-check-frontend-build:local npm run build` | PASS, тот же неизменённый frontend; tsc --noEmit/Vite, 17 modules, 969ms |
-| Полный runtime | `C up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications notifications-sender`; финально `C up --no-build --no-deps -d --wait --wait-timeout 60 notifications notifications-sender` | PASS |
-| Runtime migrations | `C exec -T api alembic check`; `C exec -T notifications alembic check` | PASS, no new upgrade operations |
-| Прежний real HTTP/TCP CI smoke | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-smtp-20261023 worker python - PHASE < infrastructure/checks/relay_smoke.py` | PASS: create/outage/recover/lost-response/recover + stop/kill/up/restart, как в CI |
-| Новый real SMTP CI smoke | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-smtp-20261023 notifications-sender python - PHASE < infrastructure/checks/smtp_smoke.py` | PASS: recover/outage/recover/lost-response/recover, Mailpit pause/unpause, SIGKILL sender, restart API/sender; последний recover повторён на финальном образе |
-| Runtime DB/health/изоляция | `C exec -T api python -`; `C exec -T notifications python -` с SELECT; docker inspect тестовых IDs и проверки логов; curl `/api/health` через frontend и Notifications `/health` | PASS: 24/7 колонок, 4 forwarded/4 будущих pending Core; 4 sent Notifications/4 Mailpit copies, all MIME; оба health200, 4 data stores tmpfs |
-| Неприкосновенность бизнес-кода/контрактов/миграций/UI | `git diff --exit-code -- backend/app/services backend/app/api backend/app/notifications backend/migrations notifications/migrations frontend`; `git diff --check` | PASS |
-
-Основная БД/volumes не использовались, строки не удалялись/не мигрировали этим этапом. Очистка тестовых fixtures затрагивает только специально созданные *_test строки, Mailpit рабочей установки не очищается. Новых миграций нет. Ошибки первых прогонов исправлены, проверки не отключены. Удалённый GitHub Actions не запускался: выполнены его локальные команды и реальные HTTP/SMTP сетевые шаги.
-
-Важные ограничения: после Core freeze письмо остаётся историческим снимком даже при отмене до MIME; протокол v1 не умеет отзывать принятые задания. Доставка не оживляет отменённое участие. SMTP accept + потерянный ответ/crash до sent может дать физический повтор; локальная дедупликация Mailpit по Message-ID не является exactly-once и зависит от наличия записи/настроек/хранилища. После лимита нужен явный retry. Один sender, без leases/масштабирования; нет нового UI/SSE. Коммит/push не выполнялись.
-
-Контроль окончательных тестов `2026-10-23T10:02:57+05:00`: повторный infrastructure прогон завершён **11 passed (14.96s)**. Итого **265 уникальных Pytest-тестов, 0 skipped**: 160 Core + 94 Notifications + 11 infrastructure. Все статические проверки, runtime migrations/health и сетевые сценарии успешны; реальное SMTP содержимое совпало с frozen MIME.
-
-Завершение `2026-10-23T10:03:54+05:00`: финальная проверка логов worker/sender без неожиданных iteration failures; docker inspect подтвердил четыре tmpfs-хранилища без named mounts и paused-контейнеров. `C down --remove-orphans` завершился exit 0 без --volumes; удалены только временные контейнеры/сеть. git diff --stat показан: 18 tracked файлов плюс отдельно перечислены 12 новых untracked файлов; diff --check успешен. Основная БД/volumes не затронуты. Коммит/push отсутствуют; работа остановлена после SMTP-этапа.
-
-
-### Повреждённый MIME не блокирует sender — 2026-10-23
-
-- `2026-10-23T13:47:32+05:00`: проверены git status/diff и актуальные load_prepared/Sender/тесты. Существующие незакоммиченные изменения SMTP-этапа сохранены; новая задача не меняет схему, публичные контракты или бизнес-операции.
-- `2026-10-23T13:48:51+05:00`: новые unit-регрессии запущены **до исправления**. Все 7 ожидаемо упали: реальные From/To со значениями `"` и `a@[` вызывают IndexError/AttributeError при ленивом get_all; дополнительно проверены три явно заданных parser exception. Это отрицательный контроль старой реализации, не отключённые проверки.
-- `2026-10-23T13:50:39+05:00`: в load_prepared добавлен локальный try/except только для IndexError, AttributeError, HeaderParseError с преобразованием в безопасный ValueError("Invalid prepared MIME"). Guard включает parsebytes и ленивый разбор при чтении заголовков. После исправления **18 MIME unit-тестов passed (0.10s)**, Ruff/format/strict Mypy исходников успешны.
-- `2026-10-23T13:51:32+05:00`: полный Core **160 passed (13.39s)**, Alembic upgrade/check и существующие round-trip/guard tests; Core Ruff/format/Mypy PASS.
-- `2026-10-23T13:53:08+05:00`: инфраструктурный набор **11 passed (16.19s)** на test-db/test-mailpit; bootstrap/изоляция/SMTP/отмена/восстановление/переносы не нарушены. Infrastructure Ruff/format/Mypy PASS. Образы пересобраны; установка прежних test-deps заняла время из-за скачивания, новых зависимостей нет.
-- `2026-10-23T13:53:50+05:00`: весь Notifications **105 passed (4.70s)**; Ruff/format/Mypy PASS, Alembic check no new upgrade operations. Итого **276 уникальных Pytest-тестов, 0 skipped**: 160 Core + 105 Notifications + 11 infrastructure.
-
-Изменены в рамках этого исправления только notifications/notifications_app/mime.py, notifications/tests/unit/test_mime.py, notifications/tests/integration/test_sender.py и этот журнал. Sender не редактировался: его прежняя обработка ValueError фиксирует failed + last_error="Invalid stored payload or MIME" и возвращает управление для следующего прохода. Общего except Exception в sender не добавлено.
-
-Добавлены 11 сценариев: 4 unit на повреждённые From/To; 3 unit на преобразование типов ошибок parser; 4 PostgreSQL-регрессии очереди. В каждой DB-регрессии плохое задание выбирается первым, становится failed, его payload/MIME/attempts/available_at не меняются, SMTP hook и renderer для него не вызываются; следующее корректное задание получает sent и единственный SMTP-вызов. Повторный проход не выбирает failed снова. Диагностика остаётся постоянным безопасным текстом, без адресов/токенов. MIME не пересоздаётся.
-
-Реальные команды (C=/tmp/maddevs-smtp-compose, тот же изолированный project event-registration-relay-check-smtp-20261023 с tmpfs и отдельными image tags, описанный в SMTP-этапе выше):
-
-| Проверка | Команда | Итог |
-|---|---|---|
-| Config/build | `C config --quiet`; `C build api test notifications notifications-test bootstrap-test` | PASS |
-| Отрицательный контроль | из notifications: `../backend/.venv/bin/pytest -q tests/unit/test_mime.py -k 'damaged_address or parser_errors'` до исправления | 7 expected failures, дефект воспроизведён |
-| Unit после исправления | из notifications: `../backend/.venv/bin/pytest -q tests/unit/test_mime.py` | 18 passed, 0.10s |
-| Полный Core | `C run --rm test` | 160 passed, 13.39s; migrations/check PASS |
-| Полный infrastructure | `C run --rm bootstrap-test` | 11 passed, 16.19s; настоящие PostgreSQL/Mailpit |
-| Полный Notifications | `C run --rm notifications-test` | 105 passed, 4.70s; migrations/check PASS |
-| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py'` | PASS, 47/29 файлов |
-| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS, 31/15 файлов |
-| Infrastructure Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS, 6 файлов |
-| Сохранность Core/старых миграций/UI | `git diff --exit-code -- backend/app/services backend/app/api backend/app/notifications backend/migrations notifications/migrations frontend`; `git diff --check` | PASS |
-
-Основные данные и volumes не использовались; runtime основной установки не запускался/не останавливался. Тесты не отключались. Удалённый GitHub Actions не запускался. Коммит/push не выполнялись.
-
-Завершение `2026-10-23T13:55:10+05:00`: docker inspect подтвердил tmpfs и отсутствие named mounts у test-db/test-mailpit изолированного проекта. `C down --remove-orphans` exit 0 без --volumes; временные контейнеры/сеть удалены. Существующая работа сохранена. Git diff --stat показан, включает предыдущий SMTP-этап и не учитывает untracked файлы; diff --check успешен. Коммита/push нет.
-
-
-### IDNA2008 email и Unicode/Punycode идентичность — 2026-10-23
-
-Все отметки — реальные чтения часов, Asia/Almaty (UTC+05:00).
-
-- `2026-10-23T15:34:37+05:00`: git status/diff чистые, HEAD 57aab8b; проверены Core service/ORM email, старые revisions 0001–0003, Notifications mailbox/MIME и тесты. Core игнорировал возвращённый email-validator ascii_email, Notifications применял Python IDNA2003 encode. Пользователь разрешил новую канонизацию и новую миграцию с предварительным аудитом, без merge/delete или изменения payload/MIME.
-- `2026-10-23T15:36:47+05:00`: **до изменений данных** выполнен отдельный SELECT в READ ONLY транзакции существующего Core API контейнера event-registration-api-1 под собственной ролью. Результат: registrations=0, would_change=0, invalid_ids=[], collision_groups=[]. Адреса/токены не выводились. Основная установка не мигрировалась/не перезапускалась. Локально email-validator 2.3.0 подтвердил faß→xn--fa-hia, fass отдельно и сохранение dots/+suffix.
-- `2026-10-23T15:38:45+05:00`: добавлены canonical_email функции обоих сервисов, Core до lookup/ORM, Notifications mailbox; новая 0004 с frozen policy, atomic preflight/ASCII CHECK и только email UPDATE. Ни одной операции над сохранёнными outbox/Notifications payload/MIME. Notifications получает тот же email-validator 2.3.0/dnspython 2.9.0 из Core constraints; остальные pins сохранены. Alembic env скрывает SQL параметры, прежние revision-файлы не менялись.
-- `2026-10-23T15:42:26+05:00`: добавлены read-only email_audit CLI, regression suites migration/HTTP/два API-процесса/legacy MIME, начата отдельная сборка event-registration-relay-check-idn-20261023 с новыми image tags и tmpfs. Статические ошибки форматирования SQL-строк исправлены; проверки не отключались.
-- `2026-10-23T15:44:45+05:00`: локальные unit **9 Core email tests** и **25 MIME tests** проходят; strict Mypy Core/Notifications/infrastructure успешен. Добавлены кросс-сервисные эталоны и проверки SMTP RCPT без SMTPUTF8.
-- `2026-10-23T15:45:34+05:00`: полный Core **177 passed (26.62s)**, в том числе успешный upgrade заполненной БД, сохранность ID/token/ticket/FIFO/outbox, безопасный downgrade/upgrade, read-only audit, полное прекращение upgrade при коллизии (включая cancelled) или invalid legacy. Два независимых API-процесса одновременно регистрируют Unicode/Punycode: одна confirmed-запись и два логических outbox задания.
-- `2026-10-23T15:46:29+05:00`: полный Notifications **116 passed (7.26s)**, legacy Unicode JSON не переписывается; корректный frozen MIME/ASCII-регистр сохраняется, неверный fass→failed/нет SMTP/следующее sent; manual retry небезопасного MIME отклонён. Настоящий тестовый SMTP сервер получил RCPT TO:<user@xn--fa-hia.de>, без SMTPUTF8, и прежние сохранённые bytes.
-- `2026-10-23T15:47:31+05:00`: infrastructure **21 passed (32.85s)**, включая реальный test-mailpit и четыре параметра полного пути, общий policy contract, bootstrap/изоляцию/права. Отдельный smoke **реально запущенных** Core API/relay/Notifications/sender/Mailpit прошёл: Unicode/Punycode/uppercase дают одну идентичность; четыре distinct адреса (включая fass, точки и +tag) дали четыре корректных ASCII-письма.
-- `2026-10-23T15:50:57+05:00`: прежние реальные локальные CI HTTP/SMTP fault checks PASS: остановка Notifications, SIGKILL relay, commit-before-ACK/lost TCP reply, duplicate202/conflict409/auth401; pause Mailpit, SIGKILL sender, lost SMTP DATA response после accept и повтор прежнего MIME. Повторный CLI email_audit runtime: total=8/changed=0/invalid=[]/collisions=[]. Оба runtime alembic check без новых операций.
-- `2026-10-23T15:53:30+05:00`: runtime SELECT подтвердил Core head0004, **24 колонки, 8 ASCII registrations, 8 forwarded + 8 future reminder pending**; Notifications **7 колонок, 8 sent/frozen MIME**. Старые revisions/API/registration/FIFO/checkin/relay/frontend diff неизменны. Документация/решения дополнены политикой и ограничениями отката.
-
-#### Изменённые файлы
-
-| Файл / функции | Зачем изменён |
-|---|---|
-| backend/app/email_addresses.py — canonical_email | Одна Core политика: strip/lower + email-validator.ascii_email, без SMTPUTF8/DNS, без casefold/удаления точек/+tag; безопасные ошибки |
-| backend/app/services/common.py — normalize_email; backend/app/db/models.py — Registration.normalize_email/CHECK | Канонизация перед поиском/сохранением; ASCII storage с прежним UNIQUE; публичные контракты/бизнес-переходы не меняются |
-| backend/app/email_audit.py — EmailAudit/audit/main | Read-only preflight с counters/UUID без email/токенов, ненулевой exit при проблемах |
-| backend/migrations/versions/0004_canonical_email.py — canonical_v1/upgrade/downgrade | Проверка всего набора под events→registrations ACCESS EXCLUSIVE до UPDATE, abort collision/invalid, обновление только email, ASCII CHECK; downgrade не восстанавливает исходное написание |
-| backend/migrations/env.py | hide_parameters=True для ошибок миграций; старые revision-файлы не редактируются |
-| backend/tests/integration/business_support.py | Чтение тестовых регистраций по той же новой канонической идентичности |
-| backend/tests/unit/test_email_addresses.py; integration/test_email_addresses.py; test_email_migration.py | ASCII/IDN/ß/повтор/concurrent HTTP/FIFO-сохранность/ограничение БД, read-only audit/коллизии/невалидные legacy/миграционный round-trip |
-| notifications/notifications_app/email_addresses.py; mime.py — mailbox/load_prepared | Та же независимая политика, legacy payload не меняется, каждый retry сравнивает canonical MIME To с canonical payload; сохранённые bytes/Date/Message-ID не меняются |
-| notifications/pyproject.toml; requirements*.lock | email-validator 2.3.0 и его dnspython зависимость; остальные версии прежние |
-| notifications/tests/unit/test_mime.py; integration/test_sender.py; test_smtp.py | faß и ASCII-регистр, legacy safe/unsafe/frozen MIME; faulty→failed/queue continues, реальный SMTP RCPT/no SMTPUTF8 |
-| infrastructure/tests/test_notification_contract.py; test_email_delivery.py | Одинаковые policy эталоны обоих сервисов; Core→JSON→MIME→SMTP→реальный Mailpit для IDN/Punycode/ASCII/dots/+suffix |
-| README.md; ARCHITECTURE.md; DECISIONS.md; DEVELOPMENT_LOG.md; docs/EMAIL_CANONICALIZATION.md; SMTP_DELIVERY.md; NOTIFICATION_PROTOCOL.md; NOTIFICATIONS_INFRASTRUCTURE.md | Правила, preflight/deploy/rollback, текущая revision, неприкосновенность сообщений, результаты/история |
-
-#### Фактически выполненные проверки
-
-C=/tmp/maddevs-idn-compose, wrapper `docker compose -f compose.yaml -f /tmp/maddevs-idn-ci.override.yaml`, COMPOSE_PROJECT_NAME=event-registration-relay-check-idn-20261023, COMPOSE_ENV_FILES=.env.example, COMPOSE_PROFILES=test, POSTGRES_PORT/FRONTEND_PORT/MAILPIT_PORT=0. Runtime db/mailpit named mounts заменены tmpfs; test-db/test-mailpit уже tmpfs. Изолированные теги event-registration-idn-check-core:local / event-registration-idn-check-notifications:local. Только локальный override ускоряет poll/backoff/budget fault tests (как в прежнем SMTP-прогоне); обычные defaults не меняются.
-
-| Проверка | Реальная команда | Результат |
-|---|---|---|
-| Existing Core collision audit | `docker exec -i event-registration-api-1 python -` с SET TRANSACTION READ ONLY + SELECT id,event_id,email и validate_email(...).ascii_email | PASS, 0 строк/коллизий/invalid; основная БД не изменялась |
-| Compose/build | `C config --quiet`; `C build api test notifications notifications-test bootstrap-test frontend`; `C build notifications-test` после последнего теста | PASS |
-| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py'` | PASS, 53 formatted / 31 Mypy files |
-| Полный Core/Alembic | `C run --rm test` | **177 passed, 26.62s**; upgrade, downgrade/upgrade/check и transactional preflight abort |
-| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS, 32 formatted / 16 Mypy files |
-| Полный Notifications/Alembic | `C run --rm notifications-test` | **116 passed, 7.26s**, миграционные проверки PASS |
-| Infrastructure Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS, 6 файлов |
-| Полный infrastructure | `C run --rm bootstrap-test` | **21 passed, 32.85s**, реальные две PostgreSQL БД/Mailpit/изоляция |
-| Runtime startup | `C up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications notifications-sender` | PASS |
-| Реальный IDN smoke | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-idn-20261023 worker python - < /tmp/maddevs-idn-real.py` | PASS, HTTP нейтральные202/4 canonical registrations/4 корректных Mailpit письма |
-| HTTP fault CI | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-idn-20261023 worker python - PHASE < infrastructure/checks/relay_smoke.py` | PASS, create/outage/recover/lost-response/recover + stop/kill/up/restart |
-| SMTP fault CI | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-idn-20261023 notifications-sender python - PHASE < infrastructure/checks/smtp_smoke.py` | PASS, recover/outage/recover/lost-response/recover + pause/unpause/SIGKILL/restart |
-| CLI preflight/runtime migrations | `C run --rm --no-deps api python -m app.email_audit`; `C exec -T api alembic check`; `C exec -T notifications alembic check` | PASS, total8/changed0/no invalid/collision; no upgrade operations |
-| Runtime DB snapshots | `C exec -T api python -`; `C exec -T notifications python -` с SELECT колонок/revision/статусов | PASS, 24/7 колонок, 8 canonical registrations/8 forwarded/8 future pending; 8 Notifications sent/MIME |
-| Старые revisions и бизнес-переходы | `git diff --exit-code -- backend/migrations/versions/0001_initial_schema.py backend/migrations/versions/0002_simplify_schema.py backend/migrations/versions/0003_outbox_forwarded.py notifications/migrations backend/app/notifications backend/app/services/registrations.py backend/app/services/events.py backend/app/services/checkins.py backend/app/api frontend`; `git diff --check` | PASS |
-
-Итого **314 уникальных Pytest-тестов, 0 skipped** (177 Core + 116 Notifications + 21 infrastructure). Не отключались падающие проверки. Основная БД проверена только чтением, migration/deployment к ней не применялись; тестовые upgrade/downgrade работают только на отдельной PostgreSQL. Collision policy не выбирает победителя и не удаляет/объединяет людей. При откате нормализованное написание не восстанавливается без backup. Сохранённые messages не ремонтируются; unsafe pending MIME failed, уже sent не пересылаются. Exactly-once SMTP по-прежнему не обещается. UI/SSE не добавлялись. Удалённый GitHub Actions не запускался; выполнены его локальные проверки. Коммит/push отсутствуют.
-
-Завершение `2026-10-23T15:56:54+05:00`: все 9 контейнеров IDNA-тестового проекта были running, все имеющиеся healthchecks healthy; оба API health HTTP200. Worker/sender logs без неожиданных iteration failures. docker inspect подтвердил db/test-db/mailpit/test-mailpit в tmpfs без named mounts/paused state. `C down --remove-orphans` завершился exit 0 без --volumes; удалены только временные контейнеры/сеть. Git diff --stat/status показаны (20 tracked + 8 новых untracked файлов), diff --check успешен. Основная установка не мигрировалась и не перезапускалась. Коммита/push нет.
-
-## Сокрытие секретов в диагностике конфигурации — 2026-10-23
-
-- `2026-10-23T16:02:28+05:00`: начата проверка текущих Settings, startup/API/worker/CLI/Alembic, git status/diff. Существующие изменения IDNA (20 tracked + 8 untracked файлов) сохранены. Основная БД/volumes не используются.
-- Добавлены регрессии перед исправлением: Core config suite **9 failed / 6 passed**, включая утечку в реальных процессах API/worker/email_audit/Alembic. Ошибочный первый вызов Pytest из корня (`tests/unit/test_config.py`) не нашёл путь и не запускал тесты; повтор из backend воспроизвёл дефект.
-- `2026-10-23T16:07:17+05:00`: Core hide_input_in_errors/repr=False, Notifications token repr=False и Alembic hide_parameters=True внесены. Локальные целевые тесты **20 Core / 33 Notifications passed**, Ruff/format и strict Mypy (33/18 файлов с новыми тестами) прошли. Проверяются вымышленные секреты, сохранение доступности исходных значений коду, причины ошибок, настоящий stderr восьми точек запуска и реальные health logs.
-- `2026-10-23T16:07:17+05:00`: собирается отдельный Compose project event-registration-relay-check-config-20261023, отдельные image tags. Runtime db/mailpit заменены tmpfs в /tmp override; test-db/test-mailpit также tmpfs. Используется .env.example, основная установка не перезапускается. README/DECISIONS описывают границы защиты и запрет вывода структурированных inputs.
-- `2026-10-23T16:09:00+05:00`: полный Core **186 passed (19.99s)**, включая прежние IDNA/конкурентные/migration suites; Alembic check без новых операций. Контейнерные Ruff/format и Mypy обоих сервисов прошли.
-- `2026-10-23T16:09:44+05:00`: полный Notifications **124 passed (12.69s)**, Alembic check без новых операций; infrastructure Ruff/format/Mypy (6 файлов) прошли.
-- `2026-10-23T16:10:50+05:00`: infrastructure **21 passed (24.77s)**, в том числе повторный bootstrap/изоляция и настоящий PostgreSQL/Mailpit end-to-end. Runtime Core, proxy frontend и Notifications health **HTTP200**, штатные миграции/запуск прошли; worker/sender logs без iteration failures/tracebacks. Inspect подтвердил tmpfs/no named volumes для db/test-db/mailpit/test-mailpit.
-
-### Фактические команды и результаты текущей задачи
-
-C=`/tmp/maddevs-config-compose` — wrapper для `docker compose -f compose.yaml -f /tmp/maddevs-config-ci.override.yaml`, COMPOSE_PROJECT_NAME=event-registration-relay-check-config-20261023, COMPOSE_ENV_FILES=.env.example, COMPOSE_PROFILES=test. Порты случайные; runtime PostgreSQL/Mailpit tmpfs, отдельные image tags config-check; TEST_DATABASE_URL использует обычные core_app_test/notifications_app_test.
-
-| Проверка | Реальная команда | Результат |
-|---|---|---|
-| Compose/build | `C config --quiet`; `C build api test notifications notifications-test bootstrap-test frontend` | PASS |
-| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py tests/unit/test_config.py tests/unit/test_health.py'` | PASS, 53 formatted / 33 Mypy files |
-| Core full Pytest + Alembic | `C run --rm test` (alembic upgrade head && pytest && alembic check) | **186 passed**, 0 skipped, миграционные round-trip тесты включены |
-| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app tests/unit/test_config.py tests/unit/test_health.py'` | PASS, 32 formatted / 18 Mypy files |
-| Notifications full Pytest + Alembic | `C run --rm notifications-test` (alembic upgrade head && pytest && alembic check) | **124 passed**, 0 skipped, миграционные тесты включены |
-| Infrastructure Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS, 6 файлов |
-| Infrastructure full Pytest | `C run --rm bootstrap-test` | **21 passed**, 0 skipped; реальный Mailpit/две БД/HTTP/SMTP |
-| Штатный startup | `C up --no-build -d --wait --wait-timeout 120 db mailpit migrate api worker frontend notifications-migrate notifications notifications-sender` | PASS |
-| Health | `C exec -T api python -` с urllib.request.urlopen к localhost:8000/api/health, frontend/api/health, notifications:8000/health | HTTP200, status=ok/database=ready для всех трёх |
-| Ресурсы/логи | `backend/.venv/bin/python /tmp/maddevs-config-inspect.py` (C ps -q → docker inspect; C logs api worker notifications notifications-sender) | Четыре tmpfs без named volumes; нет iteration failures/tracebacks |
-
-Итого **331 уникальный Pytest-тест (186 Core + 124 Notifications + 21 infrastructure), 0 skipped**. Добавлено 17 регрессий (9 Core + 8 Notifications), расширены health log assertions. Восемь отдельных startup-процессов включены в полный Pytest; невалидные DSN/токены останавливают их до сетевых соединений, stderr сохраняет имя поля/причину/traceback без fake secrets. Текущая задача меняет только config/диагностику Alembic, unit tests и документацию: backend/app/config.py; notifications/notifications_app/config.py; notifications/migrations/env.py; оба tests/unit/test_config.py и test_health.py; README.md; DECISIONS.md; DEVELOPMENT_LOG.md. Модели, schema/revision файлы, бизнес-логика и данные этой задачей не менялись; предыдущая незакоммиченная IDNA-работа сохранена. Полные fault-smoke сценарии из GitHub Actions повторно не запускались, удалённый CI не запускался. Общего подавления исключений и новых зависимостей нет. Коммит/push отсутствуют.
-
-Завершение `2026-10-23T16:12:09+05:00`: `C down --remove-orphans` завершился exit 0; удалены только временные контейнеры/сеть без --volumes. `git diff --check` успешен, git status/diff --stat показаны: 27 tracked файлов + 8 прежних untracked; статистика включает предыдущую IDNA-задачу. Diff старых revision-файлов, бизнес-переходов, Core API/relay, Notifications sender/inbox, Compose/frontend пуст. Основная установка не читалась и не изменялась в этой задаче. Коммит/push не выполнялись.
-
-## Финальная проверка backend перед frontend — 2026-10-23
-
-- `2026-10-23T16:26:40+05:00`: проверены git status/diff: 27 tracked изменений + 8 untracked от предыдущих задач сохранены. Основная установка/volumes не используются, commit/push запрещены.
-- PDF доступен: pypdf из bundled runtime извлёк общие требования стр. 1–2 и весь кейс №9 стр. 9; страницы 1/2/9 отрендерены pdftoppm и просмотрены. SHA-256 совпадает с REQUIREMENTS. pdftotext отсутствует; чтение выполнено pypdf, PDF не повреждён/не заблокирован.
-- Поиск всех SMTP_HOST/PORT/FROM и smtp_host/port/from показал отсутствие потребителей в Core кроме config и старого repr-теста. Удалены три поля Core, три environment-переменные x-backend, обновлён тест безопасного tuning-параметра. Notifications SMTP и .env.example не менялись.
-- `2026-10-23T16:30:50+05:00`: отдельный final Compose build завершён; runtime PostgreSQL/Mailpit принудительно tmpfs, отдельные image tags и project event-registration-relay-check-final-20261023. Документы актуализируются: реализованные SMTP/HTTP, current migrations, обязательные PDF UI/live/два клиента отдельно от дополнительных токенов/resume/версий/IDNA/микросервисов.
-- Запущены явные upgrade→downgrade base→upgrade→check обеих пустых тестовых БД и полный последовательный Pytest Core/Notifications/infrastructure; обычные роли core_app_test/notifications_app_test, отдельные test-db/test-mailpit. Запущены все три контейнерные Ruff/format/Mypy набора.
-- Проверена чувствительность регрессий отрицательными контролями в одноразовых копиях /app в /tmp внутри тестовых контейнеров: Core email 3 expected failed, Notifications email 2; Core secret diagnostics 5, Notifications 4. Пробы требуют AssertionError/exit1 и не принимают import/collection errors. Рабочие исходники не менялись. Во всех обычных полных наборах проверки включены.
-- `2026-10-23T16:35:46+05:00`: основной прогон завершился **186 Core passed (19.57s), 124 Notifications passed (6.66s), 21 infrastructure passed (22.15s), 0 skipped**; явные CLI upgrade/downgrade base/upgrade/check и внутренние migration round-trip/data guards прошли. Три статических набора Ruff/format/Mypy успешны: 53/32/6 formatted, 33/18/6 Mypy files.
-- `2026-10-23T16:35:46+05:00`: runtime pipeline exit0. Реальный API smoke прошёл создание/list/detail, нейтральный Unicode/Punycode email-повтор, cancel/repeat/FIFO, resume/tail/stale participation, перенос/repeat/stale schedule, 401/422 (NUL/крайние UTC даты), конкурентный чекин 200+409/старый билет404 и итог 1/1/1. После начала новый email дал нейтральный202 без третьей регистрации. Проверено реальное Mailpit письмо для каждого активного логического задания, в том числе ровно 2 reminder и 2 rescheduled; получатели/токены в вывод не попадают.
-- В том же runtime pipeline выполнены исходные infrastructure/checks/relay_smoke.py и smtp_smoke.py со всеми CI-фазами: Core работает при stopped Notifications (health/events200, event201/register202), pending/backoff во время outage, SIGKILL relay и восстановление, commit-before-ACK/lost TCP reply с restart Notifications/relay, concurrent duplicate202/conflict409/no-auth401; Mailpit pause/outage, SIGKILL sender, unpause/recovery, lost SMTP DATA reply после accept, повтор прежнего MIME после restart с одной Mailpit копией. Проверки не менялись и не отключались.
-- `2026-10-23T16:36:55+05:00`: inspect подтвердил db/test-db/mailpit/test-mailpit tmpfs без named volumes; логи временных API/worker/Notifications/sender без iteration failures/tracebacks. README/REQUIREMENTS/ARCHITECTURE/DECISIONS обновлены; UI/SSE/два браузера явно открыты, полного завершения кейса не заявлено.
-
-### Фактические команды финального прогона
-
-C=`/tmp/maddevs-final-compose` вызывает `docker compose -f compose.yaml -f /tmp/maddevs-final-ci.override.yaml`; COMPOSE_PROJECT_NAME=event-registration-relay-check-final-20261023, COMPOSE_ENV_FILES=.env.example, COMPOSE_PROFILES=test, published ports=0. Runtime DB/Mailpit mounts заменены tmpfs; test-db/test-mailpit уже tmpfs. Теги final-check-core:local / final-check-notifications:local не заменяют основные образы. Локальный override ускоряет relay/sender poll (0.2s), backoff caps (10s/2s), budget (20) только для ограниченных по времени fault-проб; штатные defaults не менялись.
-
-| Проверка | Реальная команда | Результат |
-|---|---|---|
-| PDF | bundled Python/pypdf PdfReader, extract_text страниц 1/2/9; pdftoppm этих страниц; shasum -a256 оригинала | PASS, PDF доступен, SHA совпадает |
-| Compose/build | `C config --quiet`; `C build api test notifications notifications-test bootstrap-test frontend` | PASS (frontend без изменений; готовые слои сборки переиспользованы) |
-| Core Ruff/format/Mypy | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py tests/unit/test_config.py tests/unit/test_health.py'` | PASS |
-| Notifications Ruff/format/Mypy | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app tests/unit/test_config.py tests/unit/test_health.py'` | PASS |
-| Infrastructure Ruff/format/Mypy | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS |
-| Core Alembic + весь Pytest | `C run --rm test sh -c 'alembic upgrade head && alembic downgrade base && alembic upgrade head && alembic check && pytest && alembic check'` | PASS, **186 passed** |
-| Notifications Alembic + весь Pytest | `C run --rm notifications-test sh -c 'alembic upgrade head && alembic downgrade base && alembic upgrade head && alembic check && pytest && alembic check'` | PASS, **124 passed**; приведены выполняемые Alembic/Pytest-команды без бездействовавшего предварительного shell-присваивания |
-| Infrastructure весь Pytest | `C run --rm bootstrap-test` | PASS, **21 passed** |
-| Negative controls | `C run --rm --no-deps -T test python - core < /tmp/maddevs-negative-controls.py`; аналогично notifications-test / notifications | PASS: возвращённые дефекты вызывают ожидаемые AssertionError; это отдельные disposable копии, не обычный прогон |
-| Runtime / API / CI fault scripts | `bash /tmp/maddevs-final-runtime.sh` — up --wait; health; `C run --rm --no-deps -T worker python - < /tmp/maddevs-final-api-smoke.py`; все CI-фазы ниже | PASS, exit0 |
-| HTTP CI | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-final-20261023 worker python - PHASE < infrastructure/checks/relay_smoke.py` — create/outage/recover/lost-response/recover, с stop Notifications, SIGKILL worker, up/restart | PASS, pending → forwarded, duplicates202/conflict409/no-auth401 |
-| SMTP CI | `C run --rm --no-deps -T -e RELAY_SMOKE_PROJECT=event-registration-relay-check-final-20261023 notifications-sender python - PHASE < infrastructure/checks/smtp_smoke.py` — recover/outage/recover/lost-response/recover, с pause/unpause Mailpit, SIGKILL sender, restart/up | PASS, 2/3/4 sent smoke jobs, frozen MIME совпадает с Mailpit, одна копия после lost DATA ACK |
-| Изоляция и логи | `backend/.venv/bin/python /tmp/maddevs-final-inspect.py` → C ps / docker inspect / C logs только временных сервисов | PASS, четыре tmpfs/no volumes, нет unexpected failures/tracebacks |
-
-Сверены реальные тесты: регистрационный HTTP test_api читает записи/outbox после POST и не вызывает business.join для создания результата; test_api_processes использует spawn и два независимых listener/engine, барьер подтверждает два DB waiters. test_relay_blocking проверяет NOWAIT/rollback/ограниченный обход/несколько заданий события, не затрагивает FIFO участников. Email suite проверяет faß/Punycode/ASCII/dots/+suffix/два API-процесса/миграционные коллизии; Notifications legacy snapshot не переписывается, неверный получатель → failed/нет SMTP/следующий sent, повреждённые From/To тоже failed. Config suite проверяет repr/str ValidationError, stderr настоящих Uvicorn/worker/CLI/Alembic запусков и health caplog. Отрицательные контроли доказывают обнаружение исходных дефектов. Слепые повторы всего backend-тестирования не нужны: после успешного прогона менялась только документация.
-
-Завершение `2026-10-23T16:39:52+05:00`: runtime SELECT подтвердил Core head0004/**24 поля**, ASCII email, **13 forwarded / 4 pending будущих reminder / 1 cancelled**; SMTP settings и SMTP_* environment в Core отсутствуют. Notifications head0001/**7 полей**, **13 sent с сохранённым MIME**, failed нет. Обе runtime команды `C exec -T api alembic check` / `C exec -T notifications alembic check` без новых операций. Все имеющиеся healthchecks healthy, bootstrap/миграции exit0; worker/sender running. `C down --remove-orphans` exit0 удалил только временные контейнеры/сеть, без --volumes. Основная установка/БД/volumes не читались и не менялись. UI/SSE не реализовывались; commit/push не выполнялись.
-
-Изменения именно этой задачи: backend/app/config.py (минус 3 SMTP поля); compose.yaml (минус SMTP environment Core); backend/tests/unit/test_config.py (assert безопасного relay_timeout); README.md/REQUIREMENTS.md/ARCHITECTURE.md/DECISIONS.md/DEVELOPMENT_LOG.md (актуальный статус, миграции, две границы доставки, проверенные сценарии и незакрытые PDF UI/live/двухклиентные критерии). Остальная незакоммиченная работа сохранена. `git diff --stat` включает её: 29 tracked файлов + 8 прежних untracked вне stat. `git diff --check` успешен; diff прежних revision-файлов, API/регистрации/FIFO/checkin/outbox/relay, Notifications sender/inbox, frontend и CI workflow пуст. Последний текстовый поиск устаревших утверждений дал rg exit1 из-за отсутствия совпадений, а не из-за ошибки проверки. Удалённый GitHub Actions не запускался; его существующие локальные HTTP/SMTP-сценарии пройдены полностью. Проект в целом не объявляется готовым: SSE/UI/приёмка двумя браузерами/финальная сдача остаются.
-
-## Frontend и live SSE — 2026-10-23
-
-- `2026-10-23T19:55:44+05:00`: начат этап по явному разрешению пользователя. Git status чистый, HEAD bef709c (предыдущую работу уже закоммитил пользователь). Изучены реальные HTTP DTO/маршруты/доступ/бизнес-сервисы, frontend health-каркас, архитектура и общие требования/кейс №9 из исходного PDF через pypdf. Бизнес-правила регистрации/FIFO/участия/почты не меняются.
-- `2026-10-23T20:09:05+05:00`: реализованы отдельный модуль Core api/live.py и public SSE snapshots + проверка существующего organizer key без бизнес-мутации. В SSE только публичный EventView/server_time; приватные действия используют Authorization, query credentials нет. Session закрывается перед yield/ожиданием, disconnect отменяет генератор. Написаны экраны на React/TS и дизайн тёплой афиши со строками дат, без новых полей/моковых бизнес-данных/большой UI библиотеки.
-- Промежуточные проверки нашли Ruff import order и Mypy inference SpawnProcess/BaseProcess в импортируемой test fixture; исправлены сортировка и type annotation, не поведение процесса. Первый полный Core Pytest: 187 passed / 1 failed — прежний OpenAPI test явно ожидал отсутствия SSE. Заменён проверкой существования GET stream и organizer/access; ни один тест не отключён.
-- `2026-10-23T20:18:02+05:00`: полный повторный backend прогон **188 Core passed (28.48s)**, **124 Notifications passed (6.50s)**, **21 infrastructure passed (29.77s)**, Alembic check без новых операций. Ruff/format/Mypy Core с новым SSE-test PASS (55 formatted / 33 source files). Штатный startup всех сервисов PASS в отдельном event-registration-relay-check-ui-20261023; db/mailpit и test-db/test-mailpit — tmpfs, отдельные теги/случайные порты. Адреса из Compose: frontend127.0.0.1:55052, Mailpit127.0.0.1:55051.
-- `2026-10-23T20:19:24+05:00`: реальный Google Chrome/Playwright прошёл начало двухклиентного сценария до cancel/FIFO/resume и реальные письма. Просмотрены desktop/mobile screenshots афиши/события/организатора; переполнения ширины не обнаружены. Дополнительно CUA in-app browser показал реальное пустое состояние на чистой runtime DB. Первый E2E: 1 passed / 3 failed. Два падения тестового сценария вызваны full page goto после login: ключ намеренно только в памяти, после reload требуется вход; тесты изменены на вход непосредственно на целевом пути. Третье — настоящий дефект повторного private fragment в той же вкладке: App не слушал hashchange. Добавлено потребление fragment при hashchange/popstate и remount private page по токену (без повторного использования прежних данных), raw token не сохраняется в storage/history. URL-assertions теста проверяют boolean вместо печати секретного URL.
-- `2026-10-23T20:26:23+05:00`: frontend **16 unit tests passed**, Prettier check, TypeScript/Vite PASS. Добавлены Vitest/Playwright/Prettier только как dev dependencies; runtime по-прежнему React/React DOM. Docker build проверяет формат/test/typecheck. Промежуточный build остановлен Prettier на трёх изменённых файлах; выполнен formatter, проверка не отключалась. Устранено возможное starvation медленного private GET: следующий SSE tick не отменяет ещё выполняющееся чтение; mutation по-прежнему отменяет старый GET/защищается generation. HTTP409 перечитывает фактическую регистрацию; никакого optimistic success. Добавлены безопасные ошибки malformed successful JSON и нейтральный текст без обещания доставки.
-
-Текущее окружение использует только .env.example/test-ключи. Основная установка/БД/volumes не читаются и не меняются; новые модели/миграции не нужны. UI не показывает очередной номер waitlist_seq, outbox/forwarded/протоколы. Даты/формы явно Asia/Almaty UTC+5; organizer key и management token только в памяти, после reload приватная ссылка открывается заново из письма. Коммит/push не выполняются.
-- `2026-10-23T20:31:31+05:00`: повторный E2E 2 passed / 2 failed. Полный two-client/FIFO/mail/resume/reschedule/checkin/live путь уже прошёл. Остались реальные UX-границы: initial auto-focus main обходил skip link и браузерный offline не закрывал существующий EventSource. Initial focus больше не перехватывается, SPA navigation сохраняет focus main без скачка scroll; offline закрывает Source и показывает потерю связи, online подключает заново.
-- `2026-10-23T20:34:07+05:00`: strengthened E2E проверяет origin ссылки из настоящего MIME Mailpit, а не только переносит token в тестовый URL. Нашлось ограничение тестового старта: случайный frontend порт отличался от PUBLIC_APP_URL localhost8080. Добавлены воспроизводимые browser-test overlay/script; sender запускается только после определения правильного origin. Старые MIME не переписывались. Пересозданы только disposable tmpfs контейнеры UI-проекта без volumes, чтобы убрать письма старого адреса; основная установка не затронута.
-- `2026-10-23T20:38:11+05:00`: все **4 E2E passed (34.8s)** на свежем реальном окружении, включая origin письма, независимые клиенты, 200/409 чекин/live, IDN repeat/invalid token/keyboard/404, network/reconnect и stale participation HTTP409. Notifications Ruff/format/Mypy PASS (32/16), infrastructure PASS (6/6).
-- `2026-10-23T20:41:41+05:00`: просмотрены широкие и узкие реальные screenshots афиши, события, билета, организатора и чекина. Отдельно проверен CUA in-app browser: настоящее empty состояние, login, organizer list/detail. Исправлено позиционирование focus main с preventScroll; screenshot перед fullPage возвращается к началу (в DOM ровно один header), использованный билет больше не предлагает показать код на входе. Удалён неиспользуемый прежний frontend/api/health.ts, заменённый реальным общим API-клиентом. Unit16/Prettier/TS/Vite повторно PASS.
-- `2026-10-23T21:46:26+05:00`: финальная пересборка frontend/start через repository script PASS; порт сайта55056 сохранён, sender PUBLIC_APP_URL остаётся правильным, старые prepared MIME не переписываются. Документы README/REQUIREMENTS/ARCHITECTURE актуализированы; DECISIONS фиксирует границы и ограничения. Запущен последний контрольный браузерный прогон после этих небольших визуальных изменений; до контрольной отметки 21:46 новой непрерывной истории действий не приписывается.
-- `2026-10-23T21:48:05+05:00`: контрольный E2E 3 passed / 1 failed обнаружил HTML datetime-local canonical form: нулевые секунды браузер нормализует без `:00`, Playwright fill отвергал полную строку. dateInput теперь возвращает нативную короткую форму при нулевых секундах; добавлен unit round-trip. Бизнес-время остаётся +05:00 → UTC, правила дат не менялись.
-- `2026-10-23T21:50:05+05:00`: frontend format/unit17/typecheck/Vite и Docker rebuild/start PASS; все **4 E2E passed (34.5s)** после исправления. По screenshots проверены отсутствие горизонтального overflow и единственный header. PUBLIC_APP_URL/порт55056 сохраняются при повторном start.
-- `2026-10-23T21:51:08+05:00`: дополнительная инспекция логов **не прошла**: исторические SQLAlchemy “Exception terminating connection / CancelledError” при закрытии SSE во время чтения. Не проигнорировано и не заглушено. В свежем регрессионном тесте на реальном pg_sleep/соединении и AnyIO cancel_scope дефект воспроизведён (1 failed, 2 deselected), caplog содержит тот же traceback.
-- `2026-10-23T21:55:05+05:00`: добавлен CancelScope(shield=True) только вокруг короткого read_event и закрытия Session; scope заканчивается до yield/ожидания, исключения не подавляются, отмена за пределами DB-фазы сохраняется. AnyIO уже закреплён в runtime/dev locks (4.15.1), теперь явно объявлен прямой зависимостью из-за импорта, versions/hashes не менялись. Strict Mypy потребовал явную ветку cancellation после потенциально suppressing context manager; исправлено без ignore. Ruff/format/host Mypy PASS. Документация AnyIO shielding проверена по официальному источнику; ссылка в DECISIONS.
-- `2026-10-23T21:56:45+05:00`: собирается окончательный Core с этой регрессией, запущен новый последовательный полный backend/static/migrations → реальный браузер → runtime logs прогон. До его завершения чистота логов и окончательное число backend-тестов не объявляются PASS. Старое CUA live-соединение закрыто переходом к публичной афише; вкладка сохранена как результат для пользователя.
-
-- `2026-10-23T22:02:04+05:00`: окончательный последовательный pipeline завершился **exit0**: Core/Notifications/infrastructure full Pytest + Core static, пересборка/запуск через browser-test.sh, **4 E2E passed (35.3s)**, runtime inspect PASS. Отдельный `pytest --collect-only -q` подтвердил **189 Core tests** (188 предыдущих + regression cancellation). Суммарно 334 backend-теста: 189 + 124 + 21, без отключённых/пропущенных тестов. Новая cancellation-регрессия больше не падает; свежие API/worker/Notifications/sender логи без unexpected traceback. PostgreSQL/Mailpit inspect — tmpfs, no named volumes; `/api/health` через frontend HTTP200. После финального прогона менялась только документация.
-
-### Команды и фактический результат этапа
-
-`C` здесь — `/tmp/maddevs-ui-compose`, то есть `docker compose -f compose.yaml -f /tmp/maddevs-ui-ci.override.yaml` с project `event-registration-relay-check-ui-20261023`, `.env.example`, test profile, отдельными образами/случайными портами и tmpfs runtime DB/Mailpit. Для воспроизводимого browser окружения сохранены `compose.browser-test.yaml` и `scripts/browser-test.sh`, без зависимости от /tmp override.
-
-| Проверка | Выполненная команда | Результат |
-|---|---|---|
-| Исходники/PDF | git status/diff; bundled pypdf extract_text общих требований и кейса №9; чтение реальных API/services/документов | PASS, исходный PDF доступен, бизнес-правила не заменялись UI-логикой |
-| Core lint/format/types | `C run --rm --no-deps test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py tests/integration/test_live.py'` | PASS после последнего изменения SSE |
-| Notifications lint/format/types | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS; исходники сервиса не менялись |
-| Infrastructure lint/format/types | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS |
-| Core full Pytest + Alembic | `C run --rm test` (alembic upgrade head && pytest && alembic check) | PASS, 189 тестов; включены migration upgrade/downgrade/check regression tests и два независимых API-процесса |
-| Notifications full Pytest + Alembic | `C run --rm notifications-test` (alembic upgrade head && pytest && alembic check) | PASS, 124 теста на test-db/test-mailpit |
-| Infrastructure full Pytest | `C run --rm bootstrap-test` | PASS, 21 тест; изоляция/repeated bootstrap/cross-service delivery |
-| Чувствительность новой регрессии | `C run --rm -v /Users/billcarter/Documents/MadDevs/backend/tests:/app/tests:ro test sh -c 'alembic upgrade head && pytest -q tests/integration/test_live.py -k cancel_scope'` на предыдущем образе | EXPECTED FAIL: 1 failed/2 deselected, реальный SQLAlchemy connection termination traceback; после shield полный обычный набор PASS |
-| Frontend format/unit/types/build | `docker run --rm -v /Users/billcarter/Documents/MadDevs/frontend:/app -w /app node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f sh -c 'npm run format:check && npm run test && npm run build'` | PASS, 17 Vitest; build включает tsc --noEmit, Vite успешен |
-| Сборка/запуск Compose | `C build api test bootstrap-test`; `BROWSER_TEST_PROJECT=event-registration-relay-check-ui-20261023 scripts/browser-test.sh start` | PASS; frontend Dockerfile тоже выполняет format/unit/typecheck/build, финальная пересборка использовала валидные cached layers |
-| Реальный Chrome E2E | `backend/.venv/bin/python /tmp/maddevs-run-ui-e2e.py` → bundled Node24 `frontend/node_modules/@playwright/test/cli.js test`, реальные адреса из C port, системный Chrome | PASS, 4 passed (35.3s); на хосте npm отсутствует, frontend команды выполнены в Docker, браузер — на хосте |
-| Runtime smoke/изоляция/логи | `backend/.venv/bin/python /tmp/maddevs-ui-final-inspect.py` → C ps/docker inspect/C logs + HTTP health | PASS, HTTP200, no named volumes/unexpected tracebacks |
-| Итоговый diff | `git diff --check`; `git diff --exit-code -- backend/app/services backend/app/notifications backend/app/db backend/migrations notifications .env.example`; `sh -n scripts/browser-test.sh`; `git diff --stat` | PASS, бизнес/схема/миграции/Notifications/env example без изменений |
-
-Изменённые файлы: frontend/src/App.tsx/main.tsx/style.css; новый api/client.ts, dates.ts, hooks/data.ts, components/common.tsx, pages/{Events,Participation,Organizer}.tsx; удалён неиспользуемый api/health.ts. Frontend package/lock, index, tsconfig, Dockerfile и новые Prettier/Vitest/Playwright configs/tests/e2e. Core app/api/live.py (read_event/snapshots/event_stream/verify_organizer), app/main.py (router), pyproject.toml (прямая уже pinned AnyIO dependency), tests/integration/test_live.py, test_api.py (актуальный OpenAPI), test_api_processes.py (BaseProcess annotation), CI (Mypy нового теста). Добавлены compose.browser-test.yaml/scripts/browser-test.sh. Актуализированы README/REQUIREMENTS/ARCHITECTURE/DECISIONS и этот журнал. Новые untracked файлы не входят в обычный git diff --stat до git add; git add/commit/push не выполнялись.
-
-Широкие/узкие screenshot-файлы реального Chrome: `/tmp/maddevs-ui-visual/{afisha-desktop,afisha-mobile,event-mobile,organizer-desktop,organizer-mobile,checkin-desktop,ticket-mobile}.png`. Просмотрены, исправлены начальный focus/scroll и повторная отрисовка mobile full-page capture; финальные event-mobile/organizer-desktop повторно просмотрены после последнего E2E. Отдельная CUA вкладка показывает настоящий сайт, помечена как deliverable. Контрольные данные созданы только UI/API в временном проекте; изображения/названия/поля в продукт не зашиты.
-
-Окружение оставлено для ревью: сайт http://127.0.0.1:55056, Mailpit http://127.0.0.1:55054. Ключ организатора — пример из .env.example, секреты не записываются в URL/localStorage/логи. Остановить только это окружение: `BROWSER_TEST_PROJECT=event-registration-relay-check-ui-20261023 scripts/browser-test.sh stop` (tmpfs-данные исчезнут). Основная БД и volumes не читались/не менялись. Не запускались новые удалённые GitHub Actions, Firefox/WebKit/полноценный assistive-technology аудит; Playwright пока не включён в workflow. Остались пользовательское ревью, fresh clone/приёмка, согласованные commit/push, окончательные материалы/эссе. Весь проект завершённым не объявляется.
-
-## Корректность времени, надёжность очередей и нагрузка — 2026-10-24
-
-- `2026-10-24T13:35:22+05:00`: git status чистый, HEAD e64a564. Изучены текущие frontend/API/SSE, транзакции, relay/sender, Compose/CI. Никаких действий с основной БД/volumes. Созданы отдельные tmpfs проекты event-registration-relay-check-ui-load-before-20261024 и event-registration-relay-check-ui-stages-20261024.
-- `2026-10-24T13:42:43+05:00`: исходный load_probe.py на runtime до backend-изменений: 200 одновременных POST → 200×202, confirmed10/waitlisted190, 45.72 req/s, p50 2672.66ms/p95 4145.73ms, max14 DB lock waiters; перенос 1465.73ms; 100 SSE за 8s → 530 DB commits; duplicate email/queue=0, deadlocks0. Relay/sender остановлены только в этом baseline, чтобы исключить их вклад в DB-счётчик. Это локальный замер, не гарантия тысяч пользователей.
-- `2026-10-24T13:44:33+05:00`: этап1 PASS: frontend format/17 Vitest/tsc/Vite; настоящий Chrome 6 E2E passed (1.2m). Два новых clock-теста ±365 дней используют setFixedTime (реальные таймеры сохраняются), cancel/resume/reschedule и переход через начало/чекин, offline/reconnect. UI использует только server_time+performance.now, при неизвестном/потерянном времени действия disabled; backend по-прежнему окончательно решает допустимость операции.
-- Этап2: выбран session advisory mutex PostgreSQL в каждой независимой БД для полной итерации sender/relay, AUTOCOMMIT connection без открытой SQL-транзакции в HTTP/SMTP. Это минимальная принудительная сериализация, не leases/распределённая очередь. Написаны heartbeat/queue diagnostics и явный retry Core (Notifications retry сохранён/сериализован). Полные проверки этапа2 ещё выполняются.
-
-- `2026-10-24T14:29:20+05:00`: зафиксированы решения этапов2/3 в DECISIONS и эксплуатационные границы в docs/OPERATIONS. Relay/sender сериализованы целиком session advisory mutex на выделенном AUTOCOMMIT-соединении; watchdog отменяет попытку при утрате владения. Не вводились leases, брокер, новые таблицы или SMTP exactly-once. Добавлены queue summary/failed UUID/oldest_due_seconds, heartbeat и явный безопасный retry Core. Notifications retry использует тот же mutex, неизменяемые данные не исправляет. Регрессии проверяют отдельный Python-процесс, конкурирующих обработчиков, cancellation/restart, уничтожение ownership DB connection и тот же MIME при повторе.
-- Этап3: shared LiveHub на event/process вместо SELECT/client/sec; очереди снимков размером1, cleanup последнего подписчика/отмена startup/shutdown. Private GET по изменению снимка/reconnect и fallback10s, без прежнего ежесекундного чтения каждого участия. Добавлены лимиты Nginx registration30r/s burst1000, общий SSE2000, перезапись входного XFF и cap API-процесса. Проверены429/Retry-After/подмена XFF/20 нормальных клиентов за общей NAT. Добавлены пагинация API/обоих React списков и0005_scale_indexes; поля остаются24. Перенос использует три typed bulk SQL под прежним event-lock, с тестом полного rollback при сбое последнего SQL и ограничением числа запросов. READ COMMITTED/FOR UPDATE/FIFO не заменялись локальными блокировками.
-- Этап4: workflow сохраняет старые проверки/HTTP/SMTP fault probes, добавляет Playwright на настоящих tmpfs PostgreSQL/Mailpit и edge probe, ожидание готовности и always-cleanup. PUBLIC_APP_URL передаётся между шагами после определения порта. Локально воспроизведены существующие CI HTTP/SMTP сценарии: Core независим при остановленном Notifications; retry/outage/SIGKILL; commit до потерянного HTTP ACK; одинаковый ID202/иной payload409/нет ключа401; Mailpit pause/SMTP failure/SIGKILLsender/restart; принятие DATA до потери ответа; тот же сохранённый MIME/Message-ID. Все прошли. Удалённый workflow и Linux-container Chromium шаг пока не запускались; браузер локального прогона — настоящий системный Chrome с bundled Node24.
-- Промежуточные падения не скрывались: одновременная работа нагрузочных/функциональных контейнеров дала таймауты в первой полной серии (Core182pass/3fail/5errors, Notifications124pass/1fail); на спокойном окружении после исправлений все прошли без увеличения тестовых таймаутов. После bulk переноса один прежний rollback-тест патчил удалённую функцию — переведён на действующий queue_reschedules, assertions сохранены; добавлена отдельная регрессия частичного SQL rollback. Mypy выявил ошибки типов probes/tests — исправлены. Browser серия выявила реальный дефект: после начального REST network error страница не восстанавливалась; теперь разрешён настоящий SSE recovery только для transport/503,404 не маскируется, добавлен девятый E2E. Хрупкая clock-проверка перехода через начало отвязана от скорости навигации: долгий future проверяет UI перенос, затем настоящий API задаёт ближайшее начало. Проверки не отключались, xfail/skip не добавлялись.
-- `2026-10-24T18:03:11+05:00`: продолжена работа после сообщения пользователя. Проверены текущий status/diff, результаты окончательных нагрузочных прогонов и тестовые контейнеры. Окончательная контролируемая серия выполнена последовательно: два git archive e64a564 baseline, два текущего кода и один API_WORKERS2/1000SSE. Все exit0. Предварительные SSE-пробы с повторным использованием POST HTTP pool падали и на старом, и на новом приложении: клиент теперь закрывает pool POST и использует отдельный SSE pool, без retries/ослабления требования всех подключений. Первоначальный exploratory baseline13:42 не используется как сравнение производительности.
-- `2026-10-24T18:12:14+05:00`: добавлена регрессия test_scale_indexes_preserve_populated_tables: реальная0005 downgrade0004/upgradehead на заполненных трёх таблицах, хеш полного JSON строк до/после, проверка индексов,24 колонок, alembic check. Повторён весь Core:196pass25.62s. Подготовленный payload/билет/checked_in_at сохранены. Повторный инфраструктурный Ruff/format/Mypy прошёл для10 файлов. Старые миграции не переписывались.
-- `2026-10-24T18:13:39+05:00`: окончательное приложение пересобрано/запущено только в stages-20261024. Relay/sender heartbeat healthy, Core summary forwarded99/pending37/failed0/due0, Notifications sent99/failed0/due0 (накопленные тестовые данные). Реальные ревизии0005_scale_indexes/0001_notification_jobs; PostgreSQL information_schema: events5/registrations9/email_outbox10, всего24. HTTP health200 и page limit1→1item+next_offset. Просмотрены реальные afisha-mobile/organizer-desktop скриншоты: пагинация/рабочий интерфейс без видимого переполнения. YAML и sh syntax/diff whitespace проверены.
-
-### Окончательные проверки текущего этапа
-
-Все команды выполнены в `/Users/billcarter/Documents/MadDevs`. Ниже `C` — `/tmp/maddevs-stages-compose`, обёртка `COMPOSE_PROJECT_NAME=event-registration-relay-check-ui-stages-20261024 COMPOSE_ENV_FILES=.env.example COMPOSE_PROFILES=test POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0 docker compose -f compose.yaml -f compose.browser-test.yaml`. БД/Core тестов — core_app_test, без административных прав. DB/Mailpit tmpfs; настоящее .env и основные volumes не использовались.
-
-| Проверка | Реально выполненная команда | Фактический результат |
-| --- | --- | --- |
-| Core lint/format/types + миграции + полный Pytest | `C run --rm -v /Users/billcarter/Documents/MadDevs/backend/tests:/app/tests:ro test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py tests/integration/test_live.py && alembic upgrade head && alembic downgrade base && alembic upgrade head && alembic check && pytest && alembic check'` | PASS;63 Python files formatted,39 Mypy source files;196passed25.62s;check no new operations |
-| Notifications lint/format/types | `C run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'` | PASS;36 formatted,19 Mypy files |
-| Notifications миграции/полный Pytest | `C run --rm notifications-test sh -c 'alembic upgrade head && alembic downgrade base && alembic upgrade head && alembic check && pytest && alembic check'` | PASS;128passed10.52s;check clean |
-| Infrastructure полный Pytest | `C run --rm bootstrap-test` | PASS;21passed24.08s;repeated bootstrap/владельцы/права/изоляция/cross-service |
-| Infrastructure lint/format/types, окончательные probes | `C run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'` | PASS;10 source files |
-| Frontend format/unit/typecheck/build | `docker run --rm -v /Users/billcarter/Documents/MadDevs/frontend:/app -w /app node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f sh -c 'npx prettier --write src tests e2e && npm run format:check && npm test && npm run build'` | PASS;18 Vitest,tsc --noEmit,Vite production build |
-| Настоящий Chrome Playwright | `python3 /tmp/maddevs-stage-run-e2e.py` → bundled Node24 `node_modules/@playwright/test/cli.js test` из frontend с адресами своего C port | PASS;9passed43.0s;два независимых клиента/полный бизнес-путь/clock±365дней/граница начала/initial unknown/network/SSE reconnect/pagination |
-| Compose build/start/config | `BROWSER_TEST_PROJECT=event-registration-relay-check-ui-stages-20261024 scripts/browser-test.sh start` | PASS;build api/notifications/frontend,config quiet,оба migrations,healthchecks API/frontend/worker/sender/Notifications |
-| Старые CI HTTP/SMTP faults + edge | `bash /tmp/maddevs-phase4-runtime.sh` (body извлечён из существующих workflow steps; PUBLIC_APP_URL своего порта) | PASS;Core independence,relay outage/restart/ACK loss,SMTP outage/restart/DATA response loss,429/SSE cap/NAT/XFF |
-| Queue/worker health | `C exec -T worker python -m app.worker_health`; `C exec -T notifications-sender python -m notifications_app.worker_health`; `C exec -T worker python -m app.operations --check`; `C exec -T notifications-sender python -m notifications_app.operations --check` | PASS,exit0;не раскрываются payload/адреса/токены/MIME |
-| HTTP smoke | `curl --fail --silent --show-error --max-time 10 http://127.0.0.1:55101/api/health`; аналогично `/api/events?limit=1&offset=0` | PASS;200/200,health ready,1 запись и next_offset |
-| SQL колонки/ревизии | `C exec -T db psql -U events -d event_registration -Atc "SELECT table_name,count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('events','registrations','email_outbox') GROUP BY table_name ORDER BY table_name"`; `C exec -T api alembic current`; `C exec -T notifications alembic current` | PASS;10+5+9=24,heads0005/0001 |
-| Syntax | `sh -n scripts/measure-load.sh scripts/browser-test.sh`; `ruby -ryaml -e 'YAML.load_file(".github/workflows/ci.yml")'`; `git diff --check` | PASS |
-
-Полные локальные логи: `/tmp/maddevs-final-core.log`, `/tmp/maddevs-phase4-notify{,-static}.log`, `/tmp/maddevs-phase4-infra-final.log`, `/tmp/maddevs-final-infra-static.log`, `/tmp/maddevs-phase4-frontend-fixed.log`, `/tmp/maddevs-phase4-e2e-fixed.log`, `/tmp/maddevs-phase4-runtime.log`, `/tmp/maddevs-final-compose.log`. Суммарно345 Pytest +18 Vitest +9 Playwright, без отключения проверок.
-
-### Нагрузка и ограничения
-
-Воспроизведение: `BROWSER_TEST_PROJECT=event-registration-relay-check-ui-UNIQUE LOAD_LABEL=after scripts/measure-load.sh`, дополнительный прогон с `API_WORKERS=2 LOAD_VISITORS=1000`. Baseline — отдельный `git archive e64a564`, копируются только probes/script, application code не изменяется. Каждый прогон имеет свежую tmpfs БД и отдельные image tags. JSON-результаты/EXPLAIN сохранены в `docs/load-results/2026-10-24.json`, методика/полная таблица — `docs/LOAD_TESTING.md`.
-
-Контролируемые два baseline: p95 991.74/1167.20ms; перенос405.54/361.95ms;100SSE→791/824 DB commits за8s;400 писем6.495/6.538s. Два after: p951838.41/1036.31ms;перенос65.56/32.99ms;100SSE→26/12 DB commits;400писем48.606/8.443s. Два API процесса:1000/1000SSE active,ошибок0,34 commits/8s,p951224.39ms,перенос77.27ms,400писем9.129s. В каждом200POST→200×202,capacity10/wait190,duplicate email/queue0,deadlocks0,400forwarded/Mailpit400,failed0. План страницы: Index Only Scan ix_events_start вместо Sort+Seq Scan; сохранены реальные EXPLAIN ANALYZE трёх bulk SQL.
-
-Не объявляется ускорение регистрации/SMTP: after-A имеет медленный выброс48.606s, max due93.297s, без ERROR/WARNING в сохранённом хвосте логов; причина не установлена. Очередь не потеряла задания, но задержки требуют профилирования/длительных замеров.1000 SSE≠1000 регистраций/сек;8s≠soak; hot event по-прежнему сериализуется PostgreSQL. Mutex — singleton без SMTP fencing/exactly-once. Независимые ingress не делят лимиты; NAT burst/ресурсные бюджеты требуют измерений на целевой машине. Production требуетTLS/доверенногоproxy/NTP/SMTP TLS+доменнойрепутации/backup restore/monitoring alerts/целевых latency budgets. Внешний SMTP/CD не добавлены. Удалённый GitHub Actions/Linux browser container шаг не проверен запуском, cross-browser/a11y аудит не выполнен.
-
-Документы README/REQUIREMENTS/ARCHITECTURE/DECISIONS и protocol/SMTP/worker evolution актуализированы; новые OPERATIONS/LOAD_TESTING/JSON. Обязательные требования PDF не расширяются задним числом: пагинация, ограничения, singleton, telemetry и clock UX — дополнительные проектные решения пользователя. Основные данные/volumes не изменены, commit/push/deploy не выполнялись.
-
-- `2026-10-24T18:16:23+05:00`: завершён cleanup `C down --remove-orphans` **без --volumes**; `C ps -a` пуст. Все пять нагрузочных проектов уже очищены собственным trap. Основной/предыдущий пользовательский preview-проект не останавливался. Финальный `git diff --exit-code -- backend/migrations notifications/migrations` подтвердил отсутствие изменений старых revision-файлов; новая0005 остаётся untracked вместе с остальными новыми файлами. `git diff --check` пройден.42 tracked файла изменены,22 новых; обычный diff --stat новые файлы не включает. Git add/commit/push не выполнялись.
-
-
-## Четыре исправления аудита — 2026-10-24
-
-- `2026-10-24T19:32:26+05:00`: проверены status/diff и текущий код. Начальная рабочая копия содержит42 изменённых tracked файла и22 новых от предыдущего этапа; изменения сохранены. Создано только изолированное tmpfs окружение `event-registration-relay-check-ui-audit-20261024`, `.env.example`, отдельные тестовые роли/БД; основные DB/volumes не используются.
-- Первопричины: завершённый SSE producer оставался в registry с ready/latest и принимал reconnect до cleanup; probe допускал0 регистраций при200×500 и не проверял полноту/SSE payload/deadlocks/outbox; E2E доверял номеру страницы раньше ответа и DOM строк; Availability отдельно вызывал Date.now. Полные объяснения/границы зафиксированы в DECISIONS.
-- Отрицательные контроли до исправления: `pytest -q tests/integration/test_live.py -k failed_producer` →1failed/4deselected, старая подписка ещё открыта и после реальной SQL-ошибки новый subscriber получает прежние confirmed0 вместо1. С теми же исходными критериями probe, вынесенными в validate_result без усиления, `/bootstrap-tests/test_load_probe.py` →8failed/2passed (не отклонены заданные ошибочные результаты). Настоящий Chrome `--grep 'availability uses'` →2failed при±год, `--grep 'event pagination works'` с Promise-удержанием HTTP ответа →1failed на прежнем ожидании номера страницы. Логи `/tmp/maddevs-audit-{sse,probe,clock,pagination}-before.log`. Это намеренные воспроизведения, не отключённые тесты.
-- Исправления: LiveHub retire собственного topic в producer finally, с identity-проверкой против удаления нового topic старым cleanup; обработаны initial SQL error и reconnect до old close. Availability получает serverNow/null; список получает server_time из EventPage RequestClock и использует performance.now, offline обнуляет время, online перечитывает; detail использует прежний SSE clock. Новых полей БД/миграций в этом исправлении нет; прежняя0005 сохранена.
-- Probe требует200×202,10/190,600pending именно этого события, нулевые дубли/deadlocks, все активные SSE с повторными свежими сообщениями; проверяет JSON/типы/поля/id/расписание/счётчики/aware server time и ошибки задач. Z/+00:00 сравниваются как один момент. Результат с ошибкой завершается ненулевым exit. Engine освобождается в finally. Исторические нагрузочные результаты отмечены как результаты более слабого probe, не самостоятельная приёмка.
-- E2E пагинации удерживает настоящий API-запрос Promise-барьером, проверяет loading, затем HTTP200 и точные href из ответа через retrying assertion; вперёд/назад в обоих списках. Clock-регрессии дополнительно проверяют Availability на detail/list, реальное начало события, offline/reconnect; component tests запрещают Date.now. Нет sleep или увеличенных таймаутов для маскировки гонок; интервалы работы SSE/нагрузочного измерения не изменялись.
-- `2026-10-24T19:50:25+05:00`: полный Chrome прогон11passed51.3s, включая регистрацию/FIFO/cancel/resume/tickets/двойной чекин/live/настоящие письма, неверный token/повтор IDN/network/clock/pagination. Дополнительные5 повторов удерживаемой пагинации прошли12.9s. Реальные HTTP/SMTP fault steps из CI и edge limits/NAT/XFF прошли. Дополнительно добавлен API regression с настоящим LOCK TABLE: production lock_timeout закрывает SSE; после unlock reconnect получает текущие данные и последующее изменение. Полный Core после добавления199passed31.65s.
-- `2026-10-24T19:52:13+05:00`: строгий load probe с2API/1000SSE завершился exit0.200×202,10/190,600pending,1000/1000active,9000 валидных сообщений,stale0/errors0/deadlocks0/duplicates0;400forwarded/Mailpit400/failed0,drain10.308s. Свежий отдельный tmpfs проект автоматически очищен. Сохранён JSON+EXPLAIN в docs/load-results/2026-10-24-audit.json. Не утверждается1000регистраций/сек или production SLA.
-
-Окончательные команды/результаты. `C=/tmp/maddevs-audit-compose` разворачивается в `COMPOSE_PROJECT_NAME=event-registration-relay-check-ui-audit-20261024 COMPOSE_ENV_FILES=.env.example COMPOSE_PROFILES=test POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0 docker compose -f compose.yaml -f compose.browser-test.yaml`.
-
-| Проверка | Выполненная команда | Результат |
-| --- | --- | --- |
-| Сборка образов | `C build api test notifications notifications-test bootstrap-test` | PASS |
-| Core static/full/migrations | `C run --rm -v /Users/billcarter/Documents/MadDevs/backend/tests:/app/tests:ro test sh -c 'ruff check . && ruff format --check . && mypy app tests/conftest.py tests/integration/test_relay_blocking.py tests/integration/test_live.py && alembic upgrade head && alembic downgrade base && alembic upgrade head && alembic check && pytest && alembic check'` | PASS;199passed31.65s,63 formatted/39 Mypy files;check clean |
-| Notifications static/full/migrations | `C run --rm notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app && alembic upgrade head && alembic downgrade base && alembic upgrade head && alembic check && pytest && alembic check'` | PASS;128passed8.64s,36 formatted/19 Mypy files;check clean |
-| Infrastructure static/full | `C run --rm bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks && pytest -c /app/pyproject.toml /bootstrap-tests'` | PASS;32passed26.00s,11 files,включая11 probe regressions |
-| Frontend | `docker run --rm -v /Users/billcarter/Documents/MadDevs/frontend:/app -w /app node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f sh -c 'npx prettier --write src tests e2e && npm run format:check && npm test && npm run build'` | PASS;22 Vitest/3files,Prettier,tsc,Vite |
-| Runtime CI scenarios | `bash /tmp/maddevs-audit-runtime.sh` → `BROWSER_TEST_PROJECT=event-registration-relay-check-ui-audit-20261024 scripts/browser-test.sh start` и существующие CI HTTP/SMTP/edge steps | PASS;build/start/config/health200,Core independence,outage/restart/HTTP ACK loss/SMTP DATA response loss/frozen MIME,NAT/rate/SSE cap |
-| Full Chrome | `python3 /tmp/maddevs-audit-run-e2e.py` → bundled Node24 Playwright CLI с системным Chrome и адресами C port | PASS;11passed51.3s |
-| Pagination repeats | `python3 /tmp/maddevs-audit-run-e2e.py --grep 'event pagination works' --repeat-each=5` | PASS;5passed12.9s |
-| Strict real load | `BROWSER_TEST_PROJECT=event-registration-relay-check-ui-audit-load-20261024 LOAD_LABEL=audit-strict API_WORKERS=2 LOAD_VISITORS=1000 scripts/measure-load.sh` | PASS;JSON/EXPLAIN/SMTP результаты выше |
-| Syntax | `ruby -ryaml -e 'YAML.load_file(".github/workflows/ci.yml")'`; `sh -n scripts/measure-load.sh scripts/browser-test.sh`; `git diff --check` | PASS |
-
-Первые проверки форматирования выявили несовпадение Ruff line width при вызове без --config и повторное форматирование новой цепочки frontend mock; исправлено по существующим настройкам, повторные проверки PASS. Не менялись правила/таймауты/skip ради успеха. Всего359 Pytest +22 Vitest +11 Playwright и5 дополнительных повторов. Логи `/tmp/maddevs-audit-{core-final,notify-full,infra-full,frontend,runtime,e2e-full,pagination-repeat,load-strict}.log`. Удалённый GitHub Actions/Linux Chromium container шаг не запускался, проверены локальные аналоги CI и настоящий Chrome. Production SMTP/exactly-once/длительный soak вне текущей проверки.
-
-Файлы именно текущего исправления: backend/app/live.py (LiveHub._produce); backend/app/api/events.py (EventPage/list_events); backend/tests/integration/test_api.py и test_live.py. infrastructure/checks/load_probe.py (validate_result/validate_snapshot/probe/main) и новый infrastructure/tests/test_load_probe.py. frontend/src/api/client.ts (EventPage); src/hooks/data.ts (useEvents); src/components/common.tsx (Availability); src/pages/Events.tsx; tests/api.test.ts; новый tests/availability.test.ts; e2e/events.spec.ts. Документы README/ARCHITECTURE/REQUIREMENTS/DECISIONS/DEVELOPMENT_LOG, docs/OPERATIONS/LOAD_TESTING и новый docs/load-results/2026-10-24-audit.json. Остальные изменения предыдущего этапа сохранены; commit/push/deploy не выполняются.
-
-- `2026-10-24T20:08:29+05:00`: финальный HTTP smoke health200/page200 подтвердил aware server_time. Реальные worker/sender heartbeat PASS; очередиCore forwarded47/pending28/failed0/due0,Notifications sent47/failed0/due0. Выполнен `C down --remove-orphans` без --volumes; audit ps пуст, нагрузочный проект ранее удалён своим trap. Основные DB/volumes и предыдущий пользовательский preview не изменялись. `git diff --exit-code -- backend/migrations notifications/migrations` и `git diff --check` пройдены. Итоговый diff включает также сохранённую работу предыдущего этапа; новые файлы не входят в обычный git diff --stat. Commit/push/deployment не выполнялись.
+The runtime body reproduces the existing CI health/HTTP/SMTP/edge steps using the fresh checkout, Compose overlay and public example settings. It verifies health 200, Core create 201/register 202 while Notifications is stopped, durable retry after outage/relay kill, receiver commit with lost response, concurrent duplicate acceptance 202, document conflict 409, missing auth 401, SMTP pause/sender kill/lost DATA response, byte-identical frozen MIME matching Mailpit, 429/Retry-After and shared-NAT/XFF/connection limits. Core availability never depends on SMTP. The Playwright driver uses the installed Chrome executable and existing frontend test dependencies, against the freshly built real services; no fake successful API calls.
+
+Other checks: `git diff --check`; protected-assets `git diff --exit-code`; shell `sh -n` for browser/load/bootstrap scripts; workflow Ruby YAML parsing; Markdown relative links/fences; essay sentence count 10; preserved historical timestamps; unchanged PDF hash; actual `git ls-remote origin HEAD`. All passed. Remote GitHub Actions and its Linux Chromium install were not executed; local workflow-equivalent checks and real macOS Chrome were executed. No new load measurements or production throughput claims were made.
+
+Logs remain outside Git under `/tmp/maddevs-cleanup-{build,core-full,notify-full,infra-full,infra-static-final,frontend-final}.log` and `/tmp/maddevs-cleanclone-{start,runtime,e2e}.log`; screenshots: `/tmp/maddevs-ui-visual-final-en/`. Logs/screenshots are local review artifacts, not persistent CI artifacts.
+
+### Removed local caches/artifacts
+
+- `.mypy_cache`
+- `.pytest_cache`
+- `.ruff_cache`
+- `backend/.mypy_cache`
+- `backend/.pytest_cache`
+- `backend/.ruff_cache`
+- `backend/app/__pycache__`
+- `backend/app/api/__pycache__`
+- `backend/app/db/__pycache__`
+- `backend/app/notifications/__pycache__`
+- `backend/app/services/__pycache__`
+- `backend/migrations/__pycache__`
+- `backend/migrations/versions/__pycache__`
+- `backend/tests/__pycache__`
+- `backend/tests/integration/__pycache__`
+- `backend/tests/unit/__pycache__`
+- `frontend/dist`
+- `frontend/test-results`
+- `notifications/.mypy_cache`
+- `notifications/.pytest_cache`
+- `notifications/.ruff_cache`
+- `notifications/migrations/__pycache__`
+- `notifications/migrations/versions/__pycache__`
+- `notifications/notifications_app/__pycache__`
+- `notifications/tests/__pycache__`
+- `notifications/tests/unit/__pycache__`
+
+### Final cleanup and changed files: 2026-10-26T03:13:22+05:00
+
+Both dedicated test projects were stopped with their wrappers using `down --remove-orphans`, without `--volumes`; their subsequent `ps --all --quiet` was empty. Read-only Docker inventory confirmed the existing main and October 23 preview services remained running. Cache scan excluding dependencies found no remaining permitted caches; backend/.venv, frontend/node_modules, .env and .idea remain. Only tracked deletion: main.py. Protected tracked assets and diff whitespace checks passed. The first temporary Markdown-link checker had an over-greedy regex and incorrectly combined two links; correcting that checker made all links pass without changing product files. All 169 original full ISO development timestamps and 22 decision timestamps were verified again.
+
+Tracked changes plus the new untracked essay:
+
+- `ARCHITECTURE.md`
+- `DECISIONS.md`
+- `DEVELOPMENT_LOG.md`
+- `README.md`
+- `REQUIREMENTS.md`
+- `backend/app/api/dependencies.py`
+- `backend/app/api/errors.py`
+- `backend/app/api/schemas.py`
+- `backend/app/main.py`
+- `backend/app/services/checkins.py`
+- `backend/app/services/common.py`
+- `backend/app/services/events.py`
+- `backend/app/services/registrations.py`
+- `backend/tests/integration/business_support.py`
+- `backend/tests/integration/test_api.py`
+- `backend/tests/integration/test_business.py`
+- `backend/tests/integration/test_schema.py`
+- `backend/tests/integration/test_waitlist.py`
+- `docs/EMAIL_CANONICALIZATION.md`
+- `docs/LOAD_TESTING.md`
+- `docs/NOTIFICATIONS_INFRASTRUCTURE.md`
+- `docs/NOTIFICATION_PROTOCOL.md`
+- `docs/OPERATIONS.md`
+- `docs/SMTP_DELIVERY.md`
+- `docs/WORKER_EVOLUTION.md`
+- `frontend/e2e/events.spec.ts`
+- `frontend/index.html`
+- `frontend/nginx.conf`
+- `frontend/playwright.config.ts`
+- `frontend/src/App.tsx`
+- `frontend/src/api/client.ts`
+- `frontend/src/components/Pagination.tsx`
+- `frontend/src/components/common.tsx`
+- `frontend/src/dates.ts`
+- `frontend/src/hooks/data.ts`
+- `frontend/src/pages/Events.tsx`
+- `frontend/src/pages/Organizer.tsx`
+- `frontend/src/pages/Participation.tsx`
+- `frontend/tests/availability.test.ts`
+- `frontend/tests/dates.test.ts`
+- `infrastructure/checks/limit_probe.py`
+- `infrastructure/tests/test_bootstrap.py`
+- `main.py`
+- `notifications/notifications_app/mime.py`
+- `notifications/tests/integration/test_inbox.py`
+- `notifications/tests/unit/test_mime.py`
+- `ESSAY.md`
+
+Locally ready for reviewer acceptance; no claim of a remote CI run, public availability of the current working-copy changes, production capacity or exactly-once SMTP. Commit/push/deployment were not performed. No remaining local test failure was observed. Cross-browser/production acceptance, external SMTP/TLS, monitoring, backups/restore drills and longer target-hardware load tests remain outside this task.

@@ -45,7 +45,7 @@ async def test_create_list_detail_and_aggregate_snapshots(
         "/api/events",
         headers=AUTH,
         json={
-            "description": "  Встреча  ",
+            "description": "  Meeting  ",
             "starts_at": (business.clock() + timedelta(days=2)).isoformat(),
             "capacity": 2,
         },
@@ -53,7 +53,7 @@ async def test_create_list_detail_and_aggregate_snapshots(
     assert response.status_code == 201
     event_id = UUID(response.json()["id"])
     business.event_ids.append(event_id)
-    assert response.json()["description"] == "Встреча"
+    assert response.json()["description"] == "Meeting"
     assert response.json()["confirmed"] == response.json()["checked_in"] == 0
     people = [(await business.join(event_id, f"person{i}@example.test")) for i in range(3)]
     details = (await client.get(f"/api/events/{event_id}")).json()
@@ -76,7 +76,7 @@ async def test_organizer_required_for_every_mutation(
             "POST",
             "/api/events",
             {
-                "description": "Встреча",
+                "description": "Meeting",
                 "starts_at": event.starts_at.isoformat(),
                 "capacity": 1,
             },
@@ -256,7 +256,7 @@ async def test_event_validation_does_not_echo_input(
     client: AsyncClient, business: Business, changes: dict[str, object]
 ) -> None:
     body = {
-        "description": "Встреча",
+        "description": "Meeting",
         "capacity": 1,
         "starts_at": (business.clock() + timedelta(days=1)).isoformat(),
         **changes,
@@ -278,7 +278,7 @@ async def test_create_rejects_dates_outside_utc_range_before_service(
         response = await client.post(
             "/api/events",
             headers=AUTH,
-            json={"description": "Встреча", "capacity": 1, "starts_at": starts_at},
+            json={"description": "Meeting", "capacity": 1, "starts_at": starts_at},
         )
     assert response.status_code == 422
     assert response.json()["code"] == "validation_error"
@@ -315,7 +315,7 @@ async def test_reschedule_rejects_dates_outside_utc_range_without_changes(
     ] == messages
 
 
-@pytest.mark.parametrize("description", ["\x00", "До\x00после", "\x00Встреча\x00"])
+@pytest.mark.parametrize("description", ["\x00", "Before\x00after", "\x00Meeting\x00"])
 async def test_description_rejects_null_character_before_service(
     client: AsyncClient, business: Business, description: str
 ) -> None:

@@ -1,30 +1,28 @@
-# Core → Notifications: JSON v1 и гарантии
+# Core -> Notifications: JSON v1 and delivery guarantees
 
-Это реализация согласованного разделения сервисов, а не новое обязательное требование PDF. Регистрация, FIFO, отмена/resume, билеты, чекин и транзакционная постановка outbox остаются в Core. Async SMTP реализован в Notifications; отдельные границы MIME/SMTP описаны в [SMTP_DELIVERY.md](SMTP_DELIVERY.md).
+This is the approved service split, not a requirement to use microservices in the PDF. Core retains registration, FIFO, cancellation/resume, tickets, check-in and atomic outbox creation. Notifications implements asynchronous SMTP; [SMTP_DELIVERY.md](SMTP_DELIVERY.md) describes its separate freeze boundary.
 
 ```mermaid
 sequenceDiagram
-    participant API as Core API
-    participant C as Core PostgreSQL
+    participant A as Core API
+    participant C as Core DB
     participant R as Async relay
-    participant N as Notifications HTTP
-    participant D as Notifications PostgreSQL
-    API->>C: бизнес-изменение + outbox, один commit
-    R->>C: event FOR UPDATE; проверка; freeze; attempts/backoff; commit
-    R->>N: POST JSON v1 вне DB-транзакции
-    N->>D: INSERT ON CONFLICT + сравнение JSON; commit
+    participant N as Notifications API
+    participant D as Notifications DB
+    A->>C: Business change + outbox, one commit
+    R->>C: Lock event, validate, freeze, record attempt/backoff, commit
+    R->>N: POST JSON v1, outside SQL transaction
+    N->>D: Insert/compare normalized JSON, commit
     N-->>R: 202 accepted + message_id
-    R->>C: status=forwarded, commit
-    Note over N,D: Задание принято; письмо ещё не отправлено
+    R->>C: Mark forwarded, commit
+    Note over N,D: Accepted job, not an SMTP delivery receipt
 ```
 
-## HTTP и JSON
+## HTTP contract
 
-`POST /internal/v1/notifications`, `Content-Type: application/json`, `Authorization: Bearer <NOTIFICATIONS_INTERNAL_TOKEN>`. Один технический секрет минимум 32 символа передаётся только relay и Notifications. Core API не получает этот ключ в Compose. Внутренний маршрут не опубликован на host и не проксируется frontend. Транспорт HTTP предназначен для локальной Docker-сети; TLS и полноценная сервисная авторизация не реализованы.
+`POST /internal/v1/notifications`, JSON, `Authorization: Bearer <NOTIFICATIONS_INTERNAL_TOKEN>`. The shared technical secret is at least32characters, supplied only to relay/Notifications, not the Core API/frontend build. The endpoint is not published on the host or proxied by frontend. Plain HTTP is for the local Docker network; production service authentication/TLS remains future work.
 
-Машиночитаемая схема: [notification-contract-v1.schema.json](notification-contract-v1.schema.json). Оба независимых Python-проекта валидируют контракт собственными Pydantic-моделями; CI сравнивает обе JSON Schema с этим артефактом и проверяет совместную передачу. Общей ORM/БД/пакета бизнес-логики нет.
-
-Несовместимое изменение требует новой версии: сначала получатель начинает поддерживать её вместе с v1, затем обновляется Core. Уже подготовленные v1-команды должны повторяться в v1; менять их формат/ID при деплое нельзя.
+[notification-contract-v1.schema.json](notification-contract-v1.schema.json) is the versioned artifact. Each independent Python project has its own Pydantic contract; CI compares both schemas against it and exercises cross-service delivery. There is no shared ORM/business runtime package or cross-database access.
 
 ```json
 {
@@ -35,7 +33,7 @@ sequenceDiagram
   "payload": {
     "recipient": "user@example.test",
     "event_id": "2efbf0c3-5848-45d1-ae36-92bdbb17358c",
-    "description": "Мероприятие",
+    "description": "Example event",
     "starts_at": "2030-01-03T12:00:00Z",
     "schedule_version": 1,
     "participation_no": 1,
@@ -48,77 +46,73 @@ sequenceDiagram
 }
 ```
 
-- `message_id` — прежний Core outbox UUID; не генерируется заново при retry. `registration_id` — идентичность участия, не FK в Notifications. `schema_version` — целое 1; неизвестная версия, bool вместо версии и лишние поля отклоняются с 422.
-- `kind`: ticket/waitlist/reminder/rescheduled. Ticket требует confirmed и непустой код; waitlist никогда не содержит билет, даже если участник уже повышен до подготовки начального письма. Для rescheduled обязательны разные old_starts_at/new_starts_at и new_starts_at=starts_at; другие типы не содержат старую/новую дату.
-- Новые Core recipient используют канонический lowercase ASCII email (email-validator, без SMTPUTF8). Legacy Unicode recipient остаётся в прежнем JSON без перезаписи; SMTP-проверка сверяет его каноническое представление с frozen MIME. [Политика и миграция](EMAIL_CANONICALIZATION.md).
-- Даты должны содержать timezone и укладываться в UTC; нормализуются в UTC. Нулевой символ запрещён. Схема ограничивает длины строк. Полную проверку адреса и бизнес-правил выполняет Core.
-- Необязательные поля нормализуются в null. Идентичность содержимого означает равенство нормализованного JSON: порядок ключей, написание UUID и эквивалентное смещение времени не создают новое сообщение. Иные получатель/тип/версии/данные при прежнем ID — конфликт.
-- Секрет manage_path сохраняется в приватных БД; он не возвращается в ACK/ошибках и не пишется в диагностику relay. Валидационные ошибки Notifications не отражают исходный payload.
+- message_id is the original Core outbox UUID; retry does not generate another ID. registration_id is an identity, not a Notifications FK.
+- schema_version is strict integer1. Unknown versions, bools in strict integer fields, extra fields, null characters, invalid dates/lengths or incompatible kind/payload combinations return422 without reflecting the submitted payload.
+- Kinds: ticket/waitlist/reminder/rescheduled. Ticket requires confirmed status and a code. Waitlist has no ticket, even if promotion occurred before preparation of its initial waiting message. Rescheduled needs distinct old/new dates and new_starts_at=starts_at; other kinds do not carry those dates.
+- New Core recipients are canonical lowercase ASCII emails. Legacy Unicode JSON is retained unchanged; MIME/SMTP compare canonical identity. [Email policy](EMAIL_CANONICALIZATION.md).
+- Dates are timezone-aware and UTC-normalized. Optional fields normalize to null. Content identity compares normalized JSON, so key order, UUID spelling and equivalent date offsets do not create another command. Different recipient/kind/version/content under the same ID is a conflict.
+- The management path is private database content. ACK, diagnostics and validation responses do not disclose it or recipient/body.
 
-| Ответ | Значение |
-|---|---|
-| 202 `{"message_id":"…","status":"accepted"}` | Собственная DB-транзакция Notifications успешно завершена, в том числе при идентичном повторе |
-| 409 | Прежний ID с другим нормализованным содержимым; существующая запись не меняется |
-| 401 | Нет/неверный внутренний Bearer |
-| 422 | Неизвестная версия или некорректный контракт; тело не отражается в ответе |
-| 5xx / timeout / разрыв соединения | Исход может быть неизвестен: Core сохраняет прежний ID/JSON и повторяет |
+| Response | Meaning |
+| --- | --- |
+| 202 `{"message_id":"...","status":"accepted"}` | Notifications committed its own job; also returned for an identical repeat |
+| 409 | Same ID, different normalized content; existing record unchanged |
+| 401 | Missing/incorrect internal Bearer key |
+| 422 | Invalid/unsupported contract, without echoing submitted values |
+| 5xx/timeout/disconnect | Outcome may be ambiguous; Core retries original ID/content |
 
-ACK принятия всегда `accepted`, даже если повтор относится к заданию с будущим статусом sent. Приём не сбрасывает MIME, attempts, status, available_at или last_error. Конкурентные INSERT сериализуются уникальным PK: после ON CONFLICT DO NOTHING следующий READ COMMITTED SELECT читает уже committed JSON. HTTP-приём Notifications не читает Core, не вызывает его API и не выполняет SMTP. Отдельный sender обрабатывает сохранённые задания.
+The ACK remains accepted even when the stored job is already sent/failed. Repeating HTTP never resets MIME, status, attempts, schedule or error. Concurrent inserts serialize on the unique PK; a post-conflict READ COMMITTED SELECT observes the committed JSON. Acceptance does not run SMTP or call Core.
 
-## Проверка актуальности и порядок
+Breaking changes require a new schema version: deploy receiver support alongsidev1 first, then the sender. Frozenv1 commands remainv1 through retries/deployments.
 
-1. Core сначала выбирает наступивший pending ID, освобождает read session, затем в отдельной транзакции берёт event-lock и заново читает outbox/регистрацию. Clock вызывается после получения lock. Порядок блокировок event → чтение outbox сохраняется.
-2. До первого prepare отменённое участие/устаревший participation_no отменяют задание. Ticket/waitlist/reminder получают текущие данные/версию события, начальная секретная ссылка сохраняется. Неподготовленный reminder после начала отменяется; если до −24h ещё рано, переносится available_at. Будущие версии/несовместимый контракт не отправляются и диагностируются как failed.
-3. Каждое rescheduled — отдельный исторический перенос. Его версия/старое/новое время не заменяются более поздним переносом. Задание старого поколения участия до подготовки отменяется; valid старые переносы текущего участия сохраняются.
-4. Перед первой сетью Core сохраняет envelope v1 в payload и prepared_at. С этого момента ID и весь JSON неизменяемы. На повторе relay снова читает текущее событие/участие/время под lock, но не переписывает и не отменяет уже prepared команду: прошлый HTTP мог завершиться commit с потерянным ACK. Даже после отмены/resume/переноса/начала такое задание повторяется как исторический снимок. Это граница неопределённого внешнего результата, не гарантия актуальности письма к моменту чтения.
-5. Notifications принимает каждую корректную уникальную команду независимо от относительного порядка версий/поколений. Он не применяет latest-wins, не перезаписывает старые задания и не меняет бизнес-состояние. Например, rescheduled v3 может прийти раньше ticket v1. Отсутствие глобального порядка не должно удалить первоначальное письмо со ссылкой управления. Версия/дата описывают снимок; актуальные данные и действительность билета всегда определяет Core. MIME renderer явно сохраняет исторический смысл; смена состояния в Core не переписывает уже принятый снимок.
+## Freshness and ordering
 
-## Retry, сбои и состояния
+1. Core selects due work, closes that read session, then locks the event and rereads outbox/registration in a separate short transaction. Time is evaluated after acquiring the lock.
+2. Before first preparation, cancelled/stale-generation commands are cancelled. Ticket/waitlist/reminder context can refresh to current event data while retaining the first private path. A reminder that is early is rescheduled; one that is unprepared after the start is cancelled. Future/incompatible versions or invalid contracts fail safely.
+3. Each rescheduled command represents one historical move. Later moves do not overwrite its old/new dates/version. A stale participation generation can cancel it before preparation; valid historical moves of the current generation remain.
+4. Before network, prepared_at and the completev1 envelope are committed. From there, ID and JSON are immutable. Retry rereads/revalidates but does not rewrite/cancel the frozen command: an earlier HTTP acceptance may have committed without an ACK. A subsequent cancellation/resume/move/start cannot retract an ambiguous accepted action.
+5. Notifications accepts valid unique commands regardless of arrival order. It does **not** apply latest-wins or reactivate another job. A rescheduledv3 may arrive before ticketv1; deleting that ticket could lose the first management link. Notifications renders a historical snapshot, while Core determines current ticket validity and participation.
 
-### Выбор кандидатов без head-of-line blocking
+## Bounded selection without head-of-line blocking
 
-Relay выбирает не более RELAY_CANDIDATE_LIMIT разных мероприятий за проход (default 20, диапазон 1–100). PostgreSQL DISTINCT ON оставляет для каждого события только первое готовое pending-задание по прежнему порядку `(available_at, id)`. Несколько писем занятого события не занимают всю выборку; позднее письмо этого события не обходится вместо заблокированного первого.
+Relay examines at most RELAY_CANDIDATE_LIMIT distinct event heads per pass (default20, range1–100). DISTINCT ON selects each event's first due pending item by `(available_at,id)`, so many messages from one locked event cannot fill the entire candidate page or let its later message bypass the head.
 
-События обходятся по UUID с курсором между проходами. Успешная попытка остаётся одной за run_once, после неё следующий вызов продолжает с другого события. Это даёт round-robin между независимыми мероприятиями, сохраняя выбор головы каждого события. Сроки retry и порядок `(available_at, id)` среди наступивших заданий одного события сохраняются; FIFO участников по-прежнему выполняется бизнес-транзакцией Core.
+A UUID cursor rotates between events; one successful network attempt per run_once continues from another event next time. A UTC cutoff bounds each traversal; newly arriving work enters the next traversal. On wrap the cursor/cutoff reset; a call performs at most one repeat selection. The cursor is only an in-memory hint: durable pending work is rediscovered after restart.
 
-В начале обхода фиксируется UTC cutoff готовности. Поступившие позже задания входят в следующий обход, поэтому поток новых уведомлений не растягивает текущий. При достижении конца курсор/cutoff сбрасываются; повторная выборка разрешена не более одного раза за вызов. Курсор — только подсказка в памяти, не lease и не состояние доставки: после рестарта все pending заново обнаруживаются в PostgreSQL.
+Event acquisition uses FOR UPDATE NOWAIT. SQLSTATE55P03, including a PostgreSQL lock_timeout during prepare/update/commit, is handled **after rollback**. Skipping preserves payload, prepared_at, attempts, deadline and error. A new candidate gets a new AsyncSession. Other database errors remain visible to the worker's bounded failure/pause path.
 
-Event-lock берётся SELECT FOR UPDATE NOWAIT. SQLSTATE 55P03 (NOWAIT или PostgreSQL lock_timeout, в том числе во время UPDATE/commit prepare) обрабатывается только после выхода из prepare: контекст транзакции уже выполнил rollback и освободил блокировки. Payload, prepared_at, attempts, available_at и last_error пропущенного задания остаются прежними. Следующий кандидат использует новую AsyncSession. Иные ошибки БД не скрываются; применяется прежний путь диагностики/паузы worker.
+If all candidates are blocked, run_once returns false and the worker waits normally. Subsequent pages eventually revisit skipped events; there is no busy infinite retry of the first row or permanent skip. Participant FIFO remains a Core business transaction, not relay ordering.
 
-Если все кандидаты текущей страницы заняты, run_once возвращает false, worker ждёт WORKER_POLL_INTERVAL. Следующая страница начинается после последнего просмотренного события, поэтому ограничение выборки не создаёт постоянного занятого начала очереди. Пропущенное событие возвращается при следующем полном обходе. Время ожидания при большом числе занятых страниц зависит от их количества и poll interval; бесконечного активного повтора одной строки нет. Это механизм одного relay, без распределённого claim, SKIP LOCKED или новых полей БД.
+## Attempts, backoff and recovery
 
-Один relay-процесс, один общий `httpx.AsyncClient`, `trust_env=False`, без redirects. На каждую попытку установлены httpx phase timeouts и общий asyncio deadline. HTTP начинается только после commit prepare; DB-транзакция не удерживается во время HTTP, ожидания timeout/backoff или межитерационного sleep.
+One async httpx client uses trust_env=False, no redirects, phase timeouts and a total asyncio deadline. SQL closes before HTTP/backoff/inter-iteration waiting. One active iteration is enforced by the [database singleton](OPERATIONS.md).
 
-| Настройка | Default |
-|---|---|
+| Setting | Default |
+| --- | --- |
 | NOTIFICATIONS_URL | http://notifications:8000 |
-| NOTIFICATIONS_INTERNAL_TOKEN | Обязателен для relay/Notifications; локальный пример задан в .env.example/Compose |
-| RELAY_TIMEOUT | 5 секунд, общий deadline и phase timeouts |
-| RELAY_MAX_ATTEMPTS | 8 начатых попыток, включая попытку, перед которой процесс упал |
-| RELAY_BACKOFF_BASE / RELAY_BACKOFF_CAP | 1 / 60 секунд |
-| WORKER_POLL_INTERVAL | 5 секунд при отсутствии due-заданий/ошибке DB |
-| RELAY_CANDIDATE_LIMIT | 20 голов разных событий за проход; 1–100, доступен в .env/Compose |
+| NOTIFICATIONS_INTERNAL_TOKEN | Required technical secret; public local example in Compose/.env.example |
+| RELAY_TIMEOUT | 5seconds, total deadline and phase budgets |
+| RELAY_MAX_ATTEMPTS | 8started attempts, including an attempt interrupted by a crash |
+| RELAY_BACKOFF_BASE / CAP | 1 / 60seconds |
+| WORKER_POLL_INTERVAL | 5seconds when no due work or after DB failure |
+| RELAY_CANDIDATE_LIMIT | 20distinct event heads |
 
-`min(cap, base * 2^(attempts-1))` сохраняется в available_at до HTTP (восстановление после crash) и заново от времени завершения ошибочной попытки. Успешный валидный 202 с совпадающим ID → forwarded. Транспортная ошибка, общий deadline, 408/429/5xx, неверный ACK → pending с backoff, затем failed при исчерпании лимита. Прочие ответы, включая 401/409/422/redirect/200 вместо 202, → failed без автоматического повтора. Это сохраняет ошибки конфигурации/контракта видимыми. Один проблемный ID не блокирует остальные due-задания.
+`min(cap,base*2^(attempts-1))` is persisted before HTTP for crash recovery, and recalculated from failed completion time. A valid202 with matching ID marks forwarded. Transport/deadline/408/429/5xx/invalid ACK retries until exhaustion. Other responses, including401/409/422/redirect/200 instead of202, fail without hidden endless retries. One failed ID does not block other due work.
 
-Нет удаления после ошибки и нет скрытого сброса счётчика. Failed означает необходимость вмешательства; получатель уже мог принять это задание при потерянном ответе. После исправления причины оператор при остановленном relay использует `python -m app.notifications.retry UUID --acknowledge-duplicate-risk`. Меняются только failed→pending, attempts и available_at, ID/payload/prepared_at сохраняются; контракт/состояние снова проверяет prepare. Ручной SQL reset не является штатным путём. [Команды/диагностика/mutex](OPERATIONS.md).
+| Failure point | Recovery |
+| --- | --- |
+| Before business commit | Participation/outbox roll back together |
+| After business commit, before prepare | Pending remains; freshness checked later |
+| After prepare commit, before HTTP | Same committed ID/JSON and recorded attempt/deadline after restart |
+| Before Notifications commit | No successful ACK; retry can create the job |
+| Notifications commit, lost ACK | Retry compares stored content and returns202 without another job |
+| ACK received, Core crashes before forwarded | Same idempotent retry closes the ambiguity |
+| Last allowed attempt interrupted | Exhausted job remains failed; operator diagnoses and retries explicitly |
 
-| Точка сбоя | Восстановление |
-|---|---|
-| До commit бизнес-операции | Регистрация и outbox вместе откатываются |
-| После бизнес-commit, до prepare | Строка pending остаётся, relay проверит её актуальность |
-| После prepare-commit, до HTTP | Attempts/срок/JSON уже в PostgreSQL; после рестарта тот же ID/JSON |
-| Notifications до commit | Не выдаётся успешный ACK; повтор создаст задание |
-| Notifications commit → потерян ответ | Повтор сравнит прежнюю запись, вернёт 202 без второго задания |
-| ACK получен → Core упал до forwarded commit | Повтор закрывает то же окно через идемпотентность |
-| Последняя разрешённая попытка прервана | Core сохраняет failed при следующем чтении; явный retry после диагностики |
+No task is deleted on failure or silently given a fresh counter. An explicit `python -m app.notifications.retry UUID --acknowledge-duplicate-risk` only requeues failed while retaining ID/payload/prepared_at; normal prepare revalidates it. HTTP acceptance is durable, repeated transfer with bounded automatic retries, not a distributed transaction or unconditional eventual delivery. Prolonged outages beyond the budget need intervention.
 
-Гарантия — повторяемая передача с устойчивым хранением и одним заданием на ID/содержимое. Это не распределённая транзакция и не exactly-once SMTP. При длительном простое больше retry-бюджета требуется явный повтор. После HTTP приёма job pending/mime=NULL/attempts=0. Отдельный sender сохраняет MIME до SMTP, затем переводит в sent только после SMTP accept; Core sent не выставляется.
+## Schema and evidence
 
-## Миграция и проверка
+Core head0005 adds indexes;0004 canonicalizes registrations after collision audit without rewriting outbox;0003 added forwarded CHECK values. Core remains3tables/24columns. Downgrade from0003 rejects existing forwarded rows rather than falsely calling them SMTP-sent. Notifications head0001 retains7columns; HTTP stores the entire normalized envelope, MIME initiallyNULL.
 
-Текущая head Core — `0005_scale_indexes` (только два индекса); 0004: проверка коллизий/канонизация email описаны [отдельно](EMAIL_CANONICALIZATION.md), outbox payload не меняется. На этапе HTTP relay `0003_outbox_forwarded` расширены два CHECK. 3 таблицы / 24 колонки сохранены; старые миграции и строки не меняются. Downgrade на 0002 блокируется, если есть forwarded: нельзя честно заменить принятие на sent. Notifications: прежняя revision `0001_notification_jobs`, 7 колонок, без новой миграции; payload теперь содержит весь JSON envelope. Прежние произвольные inbox payload остаются нетронутыми и конфликтуют при попытке переиспользовать их ID под другим содержимым. Legacy плоский prepared Core-контекст валидируется как v1 без его перезаписи; некорректные legacy записи остаются failed, не удаляются и не отправляются наугад.
-
-Проверки входят в CI: Core/Notifications Pytest на PostgreSQL, контракт обеих моделей, две БД с потерянным ACK и новыми экземплярами компонентов; реальный HTTP smoke из `infrastructure/checks/relay_smoke.py`. Последний выполняется только с явным RELAY_SMOKE_PROJECT в изолированном CI-проекте. Он останавливает Notifications, проверяет Core 201/202 и pending retries, убивает relay SIGKILL, восстанавливает доставку, проверяет конкурентные 202/409/401, затем разрывает реальный TCP после commit и перезапускает Notifications/relay. Прежний HTTP smoke сохранён; отдельно добавлен SMTP fault smoke, описанный в [SMTP_DELIVERY.md](SMTP_DELIVERY.md). Kafka, Redis, leases и несколько relay не добавлены.
-
-Relay.run_once защищён PostgreSQL session advisory mutex, включая сетевую фазу, без открытой SQL-транзакции. Несколько процессов не пересылают одну команду параллельно при действующей ownership-сессии; watchdog отменяет операцию при её потере. Это не отменяет commit-before-ACK retry и обязательную идемпотентность inbox.
+Tests cover equivalent/conflicting/concurrent IDs, unknown versions, auth, strict fields, transactional rollback, deadlines, unavailable receiver, commit-before-ACK, process restart, stale/future versions, blocked events and lock-timeout rollback. Real CI probes exercise running services. Full commands and outcomes are historical records in DEVELOPMENT_LOG, not inferred from the existence of these fields.

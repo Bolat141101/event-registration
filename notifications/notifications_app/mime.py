@@ -30,10 +30,10 @@ def mailbox(value: str) -> str:
 def render(message: NotificationMessage, sender: str, public_url: str, now: datetime) -> bytes:
     body = message.payload
     titles = {
-        "ticket": "Билет на мероприятие",
-        "waitlist": "Регистрация в листе ожидания",
-        "reminder": "Напоминание о мероприятии",
-        "rescheduled": "Перенос мероприятия",
+        "ticket": "Event ticket",
+        "waitlist": "Waitlist registration",
+        "reminder": "Event reminder",
+        "rescheduled": "Rescheduled event",
     }
     sender = mailbox(sender)
     mail = EmailMessage(policy=policy.SMTP)
@@ -45,25 +45,25 @@ def render(message: NotificationMessage, sender: str, public_url: str, now: date
     lines = [
         titles[message.kind],
         body.description,
-        f"Начало (UTC): {body.starts_at.isoformat()}",
-        f"Версия расписания: {body.schedule_version}",
-        f"Участие: {body.participation_no}",
-        f"Состояние на момент подготовки: {body.registration_status}",
+        f"Starts (UTC): {body.starts_at.isoformat()}",
+        f"Schedule version: {body.schedule_version}",
+        f"Participation: {body.participation_no}",
+        f"Status when prepared: {body.registration_status}",
     ]
     if message.kind == "rescheduled":
         assert body.old_starts_at is not None and body.new_starts_at is not None
         lines += [
-            f"Прежнее начало (UTC): {body.old_starts_at.isoformat()}",
-            f"Новое начало (UTC): {body.new_starts_at.isoformat()}",
+            f"Previous start (UTC): {body.old_starts_at.isoformat()}",
+            f"New start (UTC): {body.new_starts_at.isoformat()}",
         ]
     if body.ticket_code is not None:
-        lines.append(f"Код билета: {body.ticket_code}")
+        lines.append(f"Ticket code: {body.ticket_code}")
     if body.manage_path is not None:
-        lines.append(f"Управление регистрацией: {public_url.rstrip('/')}{body.manage_path}")
+        lines.append(f"Manage registration: {public_url.rstrip('/')}{body.manage_path}")
     lines.append(
-        "Это снимок регистрации на момент подготовки уведомления. "
-        "После отмены, восстановления или переноса данные могли измениться. "
-        "Актуальное состояние и действительность билета определяет сервис регистрации."
+        "This is a snapshot of your registration when the notification was prepared. "
+        "Cancellation, rejoining or rescheduling may have changed these details. "
+        "The registration service determines the current status and ticket validity."
     )
     mail.set_content("\n\n".join(lines), charset="utf-8", cte="quoted-printable")
     return mail.as_bytes()

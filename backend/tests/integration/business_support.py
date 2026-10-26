@@ -40,7 +40,7 @@ class Business:
         async with AsyncSession(self.engine, expire_on_commit=False) as session:
             item = await events.create_event(
                 session,
-                "Описание события",
+                "Event description",
                 starts_at or self.clock() + timedelta(days=2),
                 capacity,
                 self.clock,

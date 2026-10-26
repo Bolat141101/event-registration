@@ -38,6 +38,7 @@ async def main() -> None:
         )
         assert rejected.status_code == 429 and rejected.json()["code"] == "rate_limited"
         assert rejected.headers["retry-after"] == "2"
+        assert rejected.json()["message"] == "Please wait a moment and try again"
         async with AsyncExitStack() as stack:
             for _ in range(2):
                 stream = await stack.enter_async_context(

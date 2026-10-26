@@ -48,3 +48,8 @@ it('uses the native datetime-local representation when seconds are zero', () => 
   expect(dateInput('2026-10-25T16:47:00Z')).toBe('2026-10-25T21:47');
   expect(inputToISO(dateInput('2026-10-25T16:47:00Z'))).toBe('2026-10-25T16:47:00.000Z');
 });
+
+it('renders English dates while retaining the Almaty timezone', () => {
+  expect(fullDate('2026-12-31T22:10:11Z')).toBe('1 January 2027');
+  expect(time('2026-12-31T22:10:11Z')).toBe('03:10');
+});

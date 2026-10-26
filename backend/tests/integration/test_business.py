@@ -166,7 +166,7 @@ async def test_resume_keeps_identity_and_token_and_issues_new_ticket(business: B
         len([m for m in (await business.messages(person)) if m.kind == NotificationKind.REMINDER])
         == 1
     )
-    with pytest.raises(Conflict, match="Участие изменилось"):
+    with pytest.raises(Conflict, match="Participation changed"):
         await business.cancel(person, 1)
     await business.cancel(person, 2)
     with pytest.raises(Conflict):
@@ -438,7 +438,7 @@ async def test_timezone_is_mandatory_in_service(business: Business) -> None:
         with pytest.raises(ValueError, match="Timezone-aware"):
             (
                 await events.create_event(
-                    session, "Описание", business.clock().replace(tzinfo=None), 1, business.clock
+                    session, "Description", business.clock().replace(tzinfo=None), 1, business.clock
                 )
             )
 

@@ -36,7 +36,7 @@ def install_error_handlers(app: FastAPI) -> None:
             status_code=422,
             content={
                 "code": "validation_error",
-                "message": "Проверьте поля запроса",
+                "message": "Check the request fields",
                 "errors": [
                     {"loc": error["loc"], "type": error["type"], "message": error["msg"]}
                     for error in exc.errors()
@@ -61,7 +61,7 @@ def install_error_handlers(app: FastAPI) -> None:
             status_code=503 if temporary else 500,
             content={
                 "code": "database_unavailable" if temporary else "database_error",
-                "message": "База данных временно недоступна" if temporary else "Ошибка базы данных",
+                "message": "Database temporarily unavailable" if temporary else "Database error",
             },
             headers={"Retry-After": "1"} if temporary else None,
         )

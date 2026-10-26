@@ -16,7 +16,7 @@ async def check_in(
         event = await lock_event(session, event_id)
         now = as_utc(clock())
         if now < event.starts_at:
-            raise Conflict("checkin_not_started", "Чекин доступен с начала мероприятия")
+            raise Conflict("checkin_not_started", "Check-in opens when the event starts")
         entry = await session.scalar(
             select(Registration).where(
                 Registration.event_id == event_id,
@@ -25,7 +25,7 @@ async def check_in(
             )
         )
         if entry is None:
-            raise NotFound("ticket_not_found", "Действующий билет не найден")
+            raise NotFound("ticket_not_found", "No valid ticket found")
         updated = (
             await session.execute(
                 update(Registration)
@@ -35,6 +35,6 @@ async def check_in(
             )
         ).scalar_one_or_none()
         if updated is None:
-            raise Conflict("already_checked_in", "Участник уже прошёл чекин")
+            raise Conflict("already_checked_in", "Participant already checked in")
         await session.refresh(entry)
         return registration_view(entry)

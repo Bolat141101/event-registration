@@ -115,7 +115,7 @@ async def locked_registration(session: AsyncSession, token: str) -> tuple[Event,
         select(Registration.event_id).where(Registration.manage_token_hash == token_hash(token))
     )
     if event_id is None:
-        raise Unauthorized("invalid_participant_token", "Неверный токен участника")
+        raise Unauthorized("invalid_participant_token", "Invalid participant token")
     event = await lock_event(session, event_id)
     return event, (await find_registration(session, token))
 
@@ -127,11 +127,13 @@ async def cancel(
         event, entry = await locked_registration(session, token)
         now = as_utc(clock())
         if expected_participation_no != entry.participation_no:
-            raise Conflict("participation_conflict", "Участие изменилось; обновите регистрацию")
+            raise Conflict(
+                "participation_conflict", "Participation changed; refresh your registration"
+            )
         if entry.status == RegistrationStatus.CANCELLED:
             return registration_view(entry)
         if entry.checked_in_at is not None:
-            raise Conflict("already_checked_in", "Участник уже прошёл чекин")
+            raise Conflict("already_checked_in", "Participant already checked in")
         require_before_start(event, now)
         was_confirmed = entry.status == RegistrationStatus.CONFIRMED
         entry.status = RegistrationStatus.CANCELLED
@@ -159,7 +161,9 @@ async def resume(
             entry.participation_no != expected_participation_no
             or entry.status != RegistrationStatus.CANCELLED
         ):
-            raise Conflict("participation_conflict", "Участие изменилось; обновите регистрацию")
+            raise Conflict(
+                "participation_conflict", "Participation changed; refresh your registration"
+            )
         require_before_start(event, now)
         await fill_vacancies(session, event, now)
         entry.participation_no += 1

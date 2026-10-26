@@ -10,21 +10,19 @@ export function EventList() {
     <main className="container">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Ближайшие встречи</p>
-          <h1>Афиша</h1>
+          <p className="eyebrow">Upcoming events</p>
+          <h1>Events</h1>
         </div>
         <p className="timezone">{timezone}</p>
       </div>
-      {!list.data ? (
-        <LoadState error={list.error} retry={list.retry} />
-      ) : list.error ? (
+      {!list.data || list.error ? (
         <LoadState error={list.error} retry={list.retry} />
       ) : list.data.length === 0 ? (
         <div className="empty-state">
-          <h2>Пока нет мероприятий</h2>
-          <p>Новые встречи появятся здесь.</p>
+          <h2>No events yet</h2>
+          <p>New events will appear here.</p>
           <Link href="/organizer">
-            Организовать мероприятие <span aria-hidden="true">↗</span>
+            Create an event <span aria-hidden="true">↗</span>
           </Link>
         </div>
       ) : (
@@ -37,13 +35,13 @@ export function EventList() {
                   <Link href={`/events/${event.id}`}>{event.description}</Link>
                 </h2>
                 <p>
-                  {time(event.starts_at)} <span aria-hidden="true">/</span> Алматы
+                  {time(event.starts_at)} <span aria-hidden="true">/</span> Almaty
                 </p>
               </div>
               <div className="event-row-action">
                 <Availability event={event} serverNow={list.serverNow} />
                 <Link className="text-link" href={`/events/${event.id}`}>
-                  Подробнее <span aria-hidden="true">↗</span>
+                  Details <span aria-hidden="true">↗</span>
                 </Link>
               </div>
             </article>
@@ -68,20 +66,17 @@ function RegistrationForm({
   const action = useRegister(id);
   return (
     <aside className="registration-box">
-      <p className="eyebrow">Участие</p>
-      {!ready && (
-        <Notice>Уточняем время сервера. Действия станут доступны после подключения.</Notice>
-      )}
-      <h2>{waiting ? 'Присоединиться к ожиданию' : 'Зарегистрироваться'}</h2>
+      <p className="eyebrow">Participation</p>
+      {!ready && <Notice>Checking server time. Actions will be available once connected.</Notice>}
+      <h2>{waiting ? 'Join the waitlist' : 'Register'}</h2>
       {accepted ? (
         <>
           <Notice>
-            Запрос принят. Статус участия можно проверить по приватной ссылке из первого письма о
-            регистрации.
+            Request accepted. Check your participation using the private link from your first
+            registration email.
           </Notice>
           <p className="muted">
-            Письмо может прийти не сразу. Если вы регистрировались раньше, используйте прежнюю
-            ссылку.
+            Email may take a little time. If you registered before, use your original private link.
           </p>
           <button
             className="secondary"
@@ -90,7 +85,7 @@ function RegistrationForm({
               setEmail('');
             }}
           >
-            Другой email
+            Another email
           </button>
         </>
       ) : (
@@ -104,8 +99,8 @@ function RegistrationForm({
         >
           <p>
             {waiting
-              ? 'Места закончились. Если место освободится, первый в очереди получит его и письмо.'
-              : 'Укажите email для билета и сообщений о мероприятии.'}
+              ? 'No places left. If one becomes available, the first person waiting receives it and an email.'
+              : 'Enter your email for your ticket and event updates.'}
           </p>
           <label htmlFor="email">Email</label>
           <input
@@ -125,7 +120,7 @@ function RegistrationForm({
             <Notice error>{action.error?.message}</Notice>
           </div>
           <button className="primary" disabled={action.busy || !ready}>
-            {action.busy ? 'Отправляем…' : waiting ? 'Встать в лист ожидания' : 'Отправить заявку'}
+            {action.busy ? 'Sending…' : waiting ? 'Join waitlist' : 'Submit registration'}
           </button>
         </form>
       )}
@@ -145,14 +140,14 @@ export function EventPage({ id }: { id: string }) {
   return (
     <main className="container">
       <Link className="back-link" href="/">
-        ← Все мероприятия
+        ← All events
       </Link>
       <div className="event-detail">
         <section className="event-main">
           <div className="detail-date">
             <DateStamp value={data.starts_at} />
             <div>
-              <p className="eyebrow">{time(data.starts_at)} · Алматы</p>
+              <p className="eyebrow">{time(data.starts_at)} · Almaty</p>
               <p className="muted">{fullDate(data.starts_at)}</p>
             </div>
           </div>
@@ -160,18 +155,18 @@ export function EventPage({ id }: { id: string }) {
           <div className="detail-meta">
             <Availability event={data} serverNow={event.serverNow} />
             <p>
-              {data.confirmed} зарегистрировано · {data.waitlisted} в ожидании
+              {data.confirmed} registered · {data.waitlisted} waiting
             </p>
           </div>
           <LiveState status={event.live} />
         </section>
         {started ? (
           <aside className="registration-box">
-            <p className="eyebrow">Участие</p>
-            <h2>Регистрация завершена</h2>
+            <p className="eyebrow">Participation</p>
+            <h2>Registration closed</h2>
             <p>
-              Мероприятие уже началось. Если вы зарегистрированы, билет доступен по ссылке из
-              письма.
+              The event has started. If you registered, open your ticket using the link in your
+              email.
             </p>
           </aside>
         ) : (

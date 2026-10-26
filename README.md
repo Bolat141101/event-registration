@@ -1,262 +1,143 @@
-# Регистрация на мероприятия
+# Event Registration
 
-Тестовое задание, кейс №9. Стек: FastAPI, PostgreSQL, SQLAlchemy AsyncSession + asyncpg, Alembic, React, TypeScript, Docker Compose, Mailpit; для live-статистики согласован SSE.
+A client/server application for **MadDevs Agentic Developer assignment 9**: organizers create events with a capacity limit, people register by email, and staff check tickets at the entrance.
 
-## Текущее состояние
+Repository: [github.com/Bolat141101/event-registration](https://github.com/Bolat141101/event-registration). The remote was verified during the readiness review. This working copy can contain changes not yet committed or pushed; see [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) for actual verification results.
 
-Реализованы инфраструктура, схема и backend бизнес-операции:
+## What works
 
-- Асинхронный FastAPI API мероприятий, публичная регистрация, приватное управление участием и чекин;
-- три таблицы Core, 24 колонки, PostgreSQL READ COMMITTED и блокировка строки события;
-- конкурентное распределение последнего места и FIFO-продвижение внутри отмены;
-- отмена и resume с номером участия, непредсказуемые билеты и токены, хранение hash токена;
-- общий Bearer-ключ организатора; приватные действия по Bearer-токену участника;
-- согласованные счётчики confirmed/waitlisted/checked_in одним SQL-снимком;
-- транзакционная постановка ticket/waitlist/reminder/rescheduled в outbox;
-- версии переносов, идемпотентные повторы, неизменность prepared-писем;
-- последовательный async HTTP relay с deadline/backoff, защищённый идемпотентный inbox Notifications, собственная БД/роль каждого сервиса;
-- отдельный async SMTP sender, сохранение MIME, устойчивые retry/failed и безопасный ручной повтор;
-- Mailpit, отдельные healthchecks, production-сборка React и CI с реальными HTTP/SMTP проверками отказов.
+- Event creation, descriptions, dates and fixed capacity; paginated public and organizer lists.
+- Case-insensitive email registration, including equivalent Unicode/Punycode domains without SMTPUTF8. Repeating an email does not take another place or disclose someone else's registration.
+- Transactional allocation of the last place, FIFO waiting, cancellation and automatic promotion with email.
+- Private participation links, rejoining after cancellation, tickets and single-use check-in by code.
+- Organizer counters for confirmed, waiting and checked-in participants, updated through SSE.
+- One logical reminder per registration, scheduled 24 hours before the event, and separate notifications for rescheduling.
+- Durable HTTP delivery to Notifications, stored MIME, asynchronous SMTP submission, bounded retries, failed-job diagnostics and explicit manual retry.
+- English UI, API messages and newly prepared emails; responsive layouts, keyboard navigation, loading/error states and recovery after network/SQL errors.
 
-**Письма отправляются асинхронно через Mailpit.** Core relay фиксирует payload и получает HTTP acceptance (forwarded); один отдельный Notifications sender сохраняет неизменяемый MIME до SMTP и отмечает sent только после SMTP accept. Реализованы расписание, backoff, лимит попыток и явный retry failed. Риск SMTP-дубликата после accept остаётся; подавление Mailpit ограничено его текущим хранилищем/настройкой. [Контракт SMTP и команды восстановления](docs/SMTP_DELIVERY.md). Токен новой регистрации находится в первом приватном email и публичным API не возвращается. Реализованы афиша/страница события, приватное участие с билетом/отказом/resume, рабочее пространство организатора, чекин и SSE-счётчики. В продукте используются только реальные API; тестовые данные создаются отдельно через API/UI.
+The original [assignment PDF](<docs/Задания Agentic Developer (2).pdf>) is unchanged. [REQUIREMENTS.md](REQUIREMENTS.md) separates its mandatory requirements from additional choices such as rejoining, private tokens and the service split. Existing user descriptions and already prepared payload/MIME are never translated in storage.
 
-## Core + Notifications
+## Architecture
 
-Один PostgreSQL обслуживает event_registration/core_app и event_notifications/notifications_app. Core хранит бизнес-данные и outbox; Notifications имеет отдельный проект/миграции и notification_jobs (7 колонок, nullable MIME). Core не зависит от доступности процесса Notifications. Две реализованные границы неизменности: Core фиксирует неизменяемый payload, Notifications формирует и сохраняет MIME. Приём заданий реализован через защищённый POST /internal/v1/notifications. Формирование MIME и async SMTP реализованы отдельным `notifications-sender`.
-
-`db-bootstrap` работает с существующим volume: создаёт отсутствующую вторую БД/обычные роли, изолирует доступ и адресно передаёт владельцев таблиц без изменения строк. POSTGRES_USER остаётся техническим администратором, не пользователем API. Подробные настройки, обновление и проверки — [docs/NOTIFICATIONS_INFRASTRUCTURE.md](docs/NOTIFICATIONS_INFRASTRUCTURE.md).
-
-Core больше не содержит SMTP_HOST/SMTP_PORT/SMTP_FROM: SMTP-настройки принадлежат только Notifications sender. Миграции Core: 0001 initial → 0002 simplify → 0003 forwarded → 0004 canonical_email → **0005 scale_indexes**; Notifications — **0001_notification_jobs**. Старые revisions не редактируются; [preflight/IDNA/ограничения downgrade](docs/EMAIL_CANONICALIZATION.md).
-
-## API текущего этапа
-
-Организатор передаёт `Authorization: Bearer <ORGANIZER_TOKEN>` из backend environment. Участник использует такой же заголовок со своим токеном. Секреты не передаются query-параметрами, ключ организатора не попадает в frontend bundle. Полноценные аккаунты и восстановление потерянной ссылки пока отсутствуют.
-
-| Метод и маршрут | Доступ / назначение |
-|---|---|
-| GET /api/events/{id}/stream | Публичный SSE снимок/heartbeat каждую секунду, без токенов/email/билетов |
-| GET /api/organizer/access | Проверка действующего Bearer-ключа организатора без изменения данных |
-| GET /api/health | Публичная готовность БД/схемы |
-| GET /api/openapi.json | Публичная спецификация, включая тела запросов |
-| GET /api/events?limit=20&offset=0 | Публичная страница `{items,next_offset,server_time}`, limit1..100; агрегаты только выбранных событий |
-| GET /api/events/{id} | Публичные описание/дата/лимит/версия и три счётчика; без email и билетов |
-| POST /api/events | Организатор: description, timezone-aware starts_at, положительная capacity; 201 |
-| PATCH /api/events/{id}/schedule | Организатор: starts_at, expected_schedule_version |
-| POST /api/events/{id}/registrations | Публичный email; одинаковый нейтральный 202 для создания/повтора, без секретов |
-| GET /api/registration | Участник: собственное состояние и билет |
-| POST /api/registration/cancel; POST /api/registration/resume | Участник: expected_participation_no |
-| POST /api/events/{id}/check-ins | Организатор: ticket_code; 200 один раз, затем 409 |
-
-Ошибки: JSON с `code` и `message`, 401 — неверный/отсутствующий доступ, 404 — событие/действующий билет не найден, 409 — время/версия/переход, 422 — ввод, 503 — временная ошибка БД. Валидация не повторяет исходные значения секретов в ответе. Lock timeout — 2 секунды, statement timeout — 3 секунды; автоматических retries нет. После подтверждённого rollback операция не имеет частичного результата. При потере соединения в момент COMMIT исход может быть неизвестен: перед повтором проверьте текущее состояние; создание события не имеет отдельного idempotency key.
-
-Временной контракт: новое событие и новая дата — в будущем; регистрация/отмена/resume/перенос — строго до начала; чекин — с начала. Время читается после event-lock, сравнения в UTC. Вход без timezone, даты вне диапазона UTC datetime после применения смещения и нулевой символ U+0000 в описании отклоняются с HTTP 422 до вызова бизнес-операции. После начала публичная регистрация возвращает тот же нейтральный 202 для любого корректного email, но не создаёт запись: иначе различие 202/409 раскрывает существование адреса. Повтор email всегда no-op; повторы уже выполненных cancel/resume и текущей даты могут возвращать результат после начала, не создавая нового перехода. При одинаковой текущей дате перенос — no-op даже со старой версией; другая дата со старой версией — 409.
-
-Напоминание одно на всю жизнь регистрации, для confirmed и waitlisted; cancelled исключаются. Начальный срок starts_at − 24h, при позднем вступлении — сейчас. Перенос обновляет неподготовленное задание, отмена отменяет, resume реактивирует ту же строку. Prepared/sent не переписываются. Два фактических переноса, включая A → B → A, создают разные задания по schedule_version. Доставка в Mailpit реализована отдельным async sender; повтор после неизвестного SMTP-исхода использует прежний MIME/Message-ID. Ограничения дедупликации — [SMTP_DELIVERY.md](docs/SMTP_DELIVERY.md).
-
-Nginx в Docker повторно разрешает имя api через встроенный resolver (кэш 5 секунд), поэтому пересоздание API не оставляет proxy со старым IP до ручного перезапуска. Во время остановки API/обновления DNS возможен краткий 502. Проверка смены IP и восстановления приведена в DEVELOPMENT_LOG.md.
-
-## Канонизация email и миграция 0004
-
-Email хранится lowercase ASCII: email-validator возвращает IDNA2008/Punycode-домен без SMTPUTF8. `user@faß.de` и `user@xn--fa-hia.de` — одна регистрация; `user@fass.de` — другой адрес. Точки и `+суффиксы` сохраняются. Новая миграция 0004 сначала проверяет коллизии и останавливается без изменений при конфликте; сохранённые payload/MIME не переписывает. Перед обновлением выполните read-only preflight и сделайте резервную копию. [Политика, команды и ограничения downgrade](docs/EMAIL_CANONICALIZATION.md).
-
-## Асинхронный доступ к PostgreSQL
-
-Core API, бизнес-сервисы, постановка outbox и проверка БД worker используют SQLAlchemy `AsyncSession`/`AsyncEngine` и asyncpg. Одна сессия принадлежит одной операции/asyncio-задаче. Все SQL-запросы, flush, commit/rollback и закрытие соединений выполняются через await; `add`, `no_autoflush` и чтение уже загруженных полей не выполняют I/O. `expire_on_commit=False` исключает неявную перезагрузку полей после commit. Блокировки по-прежнему принадлежат PostgreSQL: async не отменяет сериализацию операций одного события.
-
-Compose уже задаёт DSN `postgresql+asyncpg://…`. При запуске вне Docker замените прежний префикс `postgresql+psycopg://` на `postgresql+asyncpg://` в DATABASE_URL и TEST_DATABASE_URL, оставив сервер, учётные данные и имя БД прежними. Синхронный драйвер больше не поддерживается. Установите обновлённый requirements-dev.lock; затем выполняйте обычные команды Alembic/uvicorn. Для самого перехода на async новая миграция не нужна, текущая ревизия остаётся `0002_simplify_schema`. Пересоздавать БД или удалять volumes не требуется.
-
-Alembic использует официальный адаптер `AsyncConnection.run_sync`: существующие revision-файлы сохраняют стандартный синхронный API Alembic, но SQL отправляется через asyncpg. В HTTP-пути нет адаптации синхронного DB-драйвера через threadpool. После отмены asyncio-задачи незавершённая транзакция откатывается и освобождает event-lock. Если соединение потеряно в момент COMMIT, исход всё так же требует проверки состояния перед повтором.
-
-## Изменение схемы 0002
-
-Три прикладные таблицы содержат 24 колонки; users не создаётся. `0001_initial_schema.py` сохранена. Upgrade нормализует существующий email через прежний email_normalized, сохраняет идентичность регистраций и outbox, удаляет название, аудитные даты и счётчик очереди. Перед обновлением существующей БД сохраните резервную копию:
-
-```sh
-docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > /tmp/event-registration-before-0002.dump
-docker compose up --build -d
+```text
+React / Nginx -> Core API -> Core PostgreSQL database
+                              | business transaction + outbox
+                              v
+                       async HTTP relay
+                              |
+                              v
+                       Notifications API -> Notifications PostgreSQL database
+                                                     | accepted jobs + frozen MIME
+                                                     v
+                                               async SMTP sender -> Mailpit
 ```
 
-Дамп содержит пользовательские данные; храните его локально вне Git. Downgrade с 0002 поддерживается только на пустых прикладных таблицах. При наличии данных он явно останавливается: удалённые значения невозможно восстановить достоверно. Для отката заполненной БД восстанавливают полный дамп в согласованное окружение со старым кодом; нельзя заменять потерянные даты текущим временем. Автоматический старт применяет только upgrade.
+One PostgreSQL instance hosts **two independent databases and application roles**. Core owns events, registrations and the transactional outbox; Notifications owns accepted notification jobs and prepared MIME. Neither application role can access the other database. HTTP acceptance means `forwarded` in Core; it does not mean SMTP delivery. Core remains available when Notifications or SMTP is unavailable.
 
-Номер очереди вычисляет `app.db.waitlist.next_waitlist_seq` после `SELECT FOR UPDATE` отдельным SQL-запросом, вставка должна завершиться в той же транзакции. Тесты проверяют реальную блокировку, свежий MAX после чужого commit, rollback и повторное использование хвоста. Этот helper используется сервисами регистрации и восстановления участия; FIFO-продвижение выполняется в их транзакциях.
+Business operations use `READ COMMITTED` and `SELECT ... FOR UPDATE` on the event. FIFO promotion happens inside cancellation's transaction. There is one active relay and one active sender, enforced with PostgreSQL session advisory locks; no SQL transaction stays open during HTTP or SMTP. There is no Redis, Celery or Kafka.
 
-## Локальный запуск
+**Mailpit is a local mail emulator.** Its web inbox proves local SMTP submission, not delivery to a real recipient. SMTP is not exactly-once: a crash after acceptance can cause a retry. Frozen MIME/Message-ID and Mailpit's configured deduplication reduce duplicates only within their documented limits. Details: [architecture](ARCHITECTURE.md), [notification protocol](docs/NOTIFICATION_PROTOCOL.md), [SMTP](docs/SMTP_DELIVERY.md).
 
-Нужны Git, работающий Docker Engine/Desktop и Docker Compose v2 или новее. Python и Node на компьютере не обязательны. Проверить: `docker version`, `docker compose version`. Используются Linux-контейнеры; на 127.0.0.1 опубликованы frontend 8080, Mailpit 8025 и PostgreSQL 5433 (значения настраиваются в .env). Первый build требует интернет для загрузки пакетов и образов; после сборки окружение работает локально без аккаунтов и внешних API. Рекомендуемый стартовый ресурс Docker: 2 CPU и 2 ГБ RAM, несколько ГБ свободного диска.
+## Start from a clean clone
 
-Из корня репозитория:
+Requirements: Git, Docker Engine/Desktop running Linux containers, and **Docker Compose v2 with `!reset` support**. The first build needs internet access to download images and locked packages. Runtime requires no paid accounts or external API. Python and Node on the host are optional; allow several GB of free disk space and enough Docker memory for PostgreSQL, builds and browsers.
 
 ```sh
+git clone https://github.com/Bolat141101/event-registration.git
+cd event-registration
 cp .env.example .env
+docker compose config --quiet
 docker compose up --build -d
 docker compose ps
 ```
 
-Если `.env` уже существует, сохраните его вместо повторного копирования. В `.env` задайте отдельные `CORE_DB_PASSWORD` и `NOTIFICATIONS_DB_PASSWORD`, замените локальные примерные `POSTGRES_PASSWORD` и `ORGANIZER_TOKEN` (минимум 32 символа). Для текущей сборки DATABASE_URL из Compose используйте в пароле URI-safe символы: латинские буквы, цифры, `-`, `_`. Сложные URL-пароли потребуют отдельного URL-encoding; `.env` не коммитится. Эти ключи предназначены для локальной разработки, не для публикации сервиса.
+If `.env` already exists, **keep it rather than copying over it**. Before starting, edit your local `.env`: replace the example `POSTGRES_PASSWORD`, `CORE_DB_PASSWORD`, `NOTIFICATIONS_DB_PASSWORD`, `ORGANIZER_TOKEN` and `NOTIFICATIONS_INTERNAL_TOKEN`. Tokens need at least 32 characters. The checked-in values are public local examples, not production credentials. Current Compose DSNs interpolate passwords into URLs: use URI-safe letters, digits, `_` and `-`, or supply correctly encoded connection settings. Never commit `.env`.
 
-Compose ждёт готовности PostgreSQL, выполняет db-bootstrap, запускает независимые миграции Core и Notifications, затем API/worker и Notifications; frontend ждёт только health Core. Таблицы вручную создавать не нужно. Успешное завершение `migrate` с кодом 0 — штатное поведение одноразового контейнера.
+Compose waits for PostgreSQL, runs the repeatable database/role bootstrap and both migration services, then starts the APIs and workers. A migration container exiting with code 0 is normal. Core's current migration head is `0005_scale_indexes`; Notifications uses `0001_notification_jobs`. There is no manual SQL setup step.
 
-- Приложение: [http://localhost:8080](http://localhost:8080).
-- Health: [http://localhost:8080/api/health](http://localhost:8080/api/health).
-- OpenAPI JSON: [http://localhost:8080/api/openapi.json](http://localhost:8080/api/openapi.json). Внешние CDN для документации не используются.
-- Почта: [http://localhost:8025](http://localhost:8025); SMTP внутри Compose — `mailpit:1025`, отправитель `events@example.test`.
+| Address | Purpose |
+| --- | --- |
+| [localhost:8080](http://localhost:8080) | Public event list and frontend |
+| [localhost:8080/organizer](http://localhost:8080/organizer) | Organizer workspace |
+| [localhost:8080/api/health](http://localhost:8080/api/health) | Core readiness; healthy response: `{"status":"ok","database":"ready"}` |
+| [localhost:8080/api/openapi.json](http://localhost:8080/api/openapi.json) | Actual API contract; Core has no separately published port |
+| [localhost:8025](http://localhost:8025) | Mailpit web inbox |
+| `127.0.0.1:5433` | Optional local PostgreSQL access; container-to-container address is `db:5432` |
 
-Порты можно изменить через `FRONTEND_PORT`, `MAILPIT_PORT` и `POSTGRES_PORT` в `.env`. PostgreSQL доступен локально на `127.0.0.1:5433` по умолчанию; межконтейнерный адрес остаётся `db:5432`. Дополнительные настройки API/worker перечислены в `backend/app/config.py`, передаются через environment сервиса; секрет организатора не встраивается во frontend.
+Open **Organizer**, copy `ORGANIZER_TOKEN` from your own local `.env`, and enter it in **Organizer key**. There are no accounts or generated default passwords. The key stays in memory in that tab, is cleared on reload/sign-out, and is not embedded in the frontend bundle. Participants use the private link in their first email; knowing an email alone cannot recover that token.
 
-Диагностика конфигурации обоих сервисов скрывает DSN и токены из `repr(Settings)`. URL relay скрыт в Core, адрес отправителя/public URL — в Notifications. Текст `ValidationError` не показывает исходные значения. Ошибочный запуск API, worker, служебного CLI или Alembic завершается с ненулевым кодом: остаются traceback, имя поля и причина ошибки, например требование `postgresql+asyncpg` или минимальная длина токена. Runtime и Alembic скрывают SQL bind-параметры. Это защита текстовой диагностики; `model_dump()` и структурированный `ValidationError.errors()` могут содержать исходные значения, поэтому их нельзя выводить в логи.
-
-Успешный health:
-
-```json
-{"status":"ok","database":"ready"}
-```
-
-При недоступной БД или неверной ревизии возвращаются HTTP 503 и нейтральная диагностика без DSN/пароля. Это готовность API/схемы. Корректность реализованных регистрации/FIFO/чекина проверяется отдельными тестами; health не подтверждает доставку писем.
-
-Логи и управление:
+Ports are configurable with `FRONTEND_PORT`, `MAILPIT_PORT` and `POSTGRES_PORT`. When changing the site port, set `PUBLIC_APP_URL` to that same site origin **before preparing emails**. Existing frozen links/MIME are not rewritten.
 
 ```sh
-docker compose logs --tail=100 api migrate worker notifications notifications-migrate db-bootstrap mailpit
-docker compose restart api worker
+docker compose logs --tail=100 api worker notifications notifications-sender migrate notifications-migrate db-bootstrap
 docker compose down
 ```
 
-`down` сохраняет PostgreSQL и Mailpit volumes. `docker compose down -v` удаляет данные этого проекта; используйте только для намеренного полного сброса. Смена пароля `.env` не меняет пароль уже созданного PostgreSQL-пользователя автоматически.
+The main environment uses persistent PostgreSQL/Mailpit named volumes; `down` keeps them. Do not remove volumes to repair an upgrade. Back up an existing installation before applying migrations. The bootstrap also works with an existing volume and preserves rows; application role passwords are set during bootstrap, while changing the PostgreSQL administrator's `.env` password does not rotate an existing server password by itself. [Upgrade and isolation notes](docs/NOTIFICATIONS_INFRASTRUCTURE.md).
 
-## Тесты и проверки
+## Review the application with two clients
 
-Основной вариант — полностью в Docker:
+1. Create an event in Organizer with capacity **1** and a future date. All displayed/input dates use **Almaty, UTC+5**, independent of the device timezone.
+2. Open its public page in two independent browser contexts. Register two different emails, concurrently if desired. Both public responses are neutral; one person gets the place and the other joins the waitlist.
+3. Open Mailpit and follow each first registration email's private link. The confirmed participant has a ticket; the waiting participant has no ticket or invented queue position.
+4. Cancel the confirmed participant's attendance before the start. The first waiting participant is promoted atomically and receives a ticket email. Repeating an email takes no additional place. Rejoining uses the private link and joins the queue tail if full.
+5. Reschedule to a nearby **future** time. Both active participants receive a rescheduling email. Keep Organizer open and wait for the start; check-in is allowed **from the start**, while registration/cancellation/rescheduling are only allowed before it.
+6. Open **Check-in**, enter the valid ticket, and submit. A second submission is rejected; the organizer's checked-in counter updates live. Use two staff tabs to check that the same code cannot succeed twice.
 
-```sh
-docker compose --profile test build test notifications-test bootstrap-test
-docker compose --profile test run --rm test
-docker compose --profile test run --rm notifications-test
-docker compose --profile test run --rm bootstrap-test
-docker compose --profile test run --rm --no-deps test ruff check .
-docker compose --profile test run --rm --no-deps test ruff format --check .
-docker compose --profile test run --rm --no-deps test mypy app
-```
+To observe the 24-hour reminder manually, create an event a little over 24 hours away and reschedule it a little under 24 hours away; an unprepared reminder becomes due. Its logical identity is retained through further changes. Automated tests cover exact boundaries, waiting/confirmed recipients, cancellation, rescheduling and crash recovery without waiting a day.
 
-`test` поднимает отдельный `test-db`, дожидается `test-db-bootstrap`, применяет миграции, выполняет Pytest и `alembic check` под обычной ролью `core_app_test`. Фикстура отклоняет административную роль и членство в других ролях. Используется PostgreSQL, не SQLite. Тестовая БД не имеет опубликованного порта, хранится в tmpfs и не использует volume приложения. В тестах round-trip миграции выполняется downgrade/upgrade **только в БД с именем, заканчивающимся на `_test`**; не задавайте TEST_DATABASE_URL основной БД.
+## Tests: use an isolated environment
 
-`bootstrap-test` — отдельный инфраструктурный тест настоящего `bootstrap.sh`: заполнение обеих БД, два повторных запуска, полное сравнение строк, MIME/payload, версий Alembic, владельцев/ACL, индексов и ограничений. Также проверяются прикладные права и реальные отказы подключения к чужой БД с SQLSTATE 42501. Административные учётные данные нужны только bootstrap-контейнерам; Core/Notifications тесты их не получают. Запускайте три набора последовательно: тесты миграций изменяют схему. Подробности — [Notifications infrastructure](docs/NOTIFICATIONS_INFRASTRUCTURE.md).
-
-Проверяются конфигурация/секреты, ответы health, миграции вверх/вниз и соответствие моделям, типизированные даты, уникальность event/email и FIFO-позиции, недопустимые состояния регистрации, уникальность outbox и совместный rollback регистрации/задания. Дополнительно проверяются реальные сервисы/API и конкурентные запросы на PostgreSQL: последнее место, одинаковый email, отмена с новым участником, повторная отмена, resume, чекин и время после ожидания блокировки. В тестах отдельные asyncio-задачи с собственными сессиями одновременно ждут event-lock; наблюдатель проверяет реальные pg_blocking_pids. Также проверяются доступность health/чтения во время блокировки, rollback регистрации/outbox и освобождение lock при отмене задачи, ошибки подключения asyncpg. Регистрация на последнее место и однократный чекин дополнительно проверяются через два независимых Uvicorn-процесса с настоящими HTTP-запросами и отдельными пулами БД; до снятия event-lock наблюдатель подтверждает ожидание двух транзакций. Worker отправки не запускается.
-
-После тестов можно остановить только тестовую БД:
+The main environment is for persistent data. **Never run downgrade, truncation, failure injection or load scripts against it.** The test overlay replaces application storage with tmpfs, uses `.env.example`, a separate Compose project, distinct `_test` databases/ordinary roles, and random localhost ports. It does not read your `.env`.
 
 ```sh
-docker compose --profile test stop test-db
+export BROWSER_TEST_PROJECT=event-registration-relay-check-ui-review
+export COMPOSE_PROJECT_NAME="$BROWSER_TEST_PROJECT"
+export COMPOSE_FILE=compose.yaml:compose.browser-test.yaml
+export COMPOSE_ENV_FILES=.env.example COMPOSE_PROFILES=test
+export POSTGRES_PORT=0 FRONTEND_PORT=0 MAILPIT_PORT=0
+
+docker compose config --quiet
+docker compose build api test notifications notifications-test bootstrap-test frontend
+docker compose run --rm test
+docker compose run --rm notifications-test
+docker compose run --rm bootstrap-test
+
+docker compose run --rm --no-deps test ruff check .
+docker compose run --rm --no-deps test ruff format --check .
+docker compose run --rm --no-deps test mypy app tests/conftest.py tests/integration/test_relay_blocking.py tests/integration/test_live.py
+docker compose run --rm --no-deps notifications-test sh -c 'ruff check . && ruff format --check . && mypy notifications_app'
+docker compose run --rm --no-deps bootstrap-test sh -c 'ruff check --config /app/pyproject.toml /bootstrap-tests /checks && ruff format --check --config /app/pyproject.toml /bootstrap-tests /checks && mypy --config-file /app/pyproject.toml /bootstrap-tests /checks'
 ```
 
-Для разработки вне Docker: Python 3.12+, виртуальное окружение и `pip install -r backend/requirements-dev.lock`; для frontend — Node 24, `npm ci` и `npm run build` в `frontend`. Локальный API запускается из `backend` командой `uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000` после настройки DATABASE_URL/ORGANIZER_TOKEN и миграции. `npm run dev` проксирует `/api` на этот локальный API. Без TEST_DATABASE_URL PostgreSQL integration-тесты пропускаются; такой запуск не является полной проверкой этапа.
+These Python services use real PostgreSQL/Mailpit, apply migrations and run `alembic check`. Their migration regressions also exercise upgrade/downgrade on **isolated `_test` databases only**. Never point `TEST_DATABASE_URL` at real data. Running Pytest without integration settings is not a complete verification.
 
-## GitHub Actions CI
+The frontend Docker build runs Prettier, Vitest, TypeScript and Vite. For frontend development use Node **24**, `cd frontend && npm ci`, then `npm run format:check`, `npm test` and `npm run build`. This rebuilds native dependencies for the current OS; use Docker if local packages were installed for another platform. Do not delete `.venv` or `node_modules` as a substitute for diagnosing a dependency issue.
 
-Workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) запускается на push в `main` и Pull Request с целевой веткой `main`. Один job на `ubuntu-24.04` выполняет:
-
-1. Валидацию Compose и сборку backend/test из существующих Dockerfile и lock-файлов.
-2. Ruff (включая форматирование), Mypy и весь Pytest без исключения интеграционных тестов.
-3. Независимые Ruff/format/Mypy/Pytest Notifications, изоляцию ролей и миграции обоих проектов на настоящем PostgreSQL: upgrade, тест downgrade/upgrade и `alembic check`. Все Core-тесты выполняются под `core_app_test`, Notifications — под `notifications_app_test`.
-4. Отдельные Ruff/format/Mypy и интеграционный тест повторного bootstrap с данными в обеих тестовых БД, контролем владельцев/прав и запрета доступа между сервисами.
-5. Сборку frontend: npm ci, Prettier check, Vitest, TypeScript typecheck и Vite. Playwright E2E запускаются отдельной командой в локальном изолированном окружении; GitHub workflow теперь включает их запуск (изменение 2026-10-24; удалённый запуск ещё не выполнен).
-6. Запуск приложения с новыми БД/volumes, проверки обоих health и независимости Core при остановленном Notifications.
-7. Реальный SMTP smoke: недоступность Mailpit, SIGKILL sender, неизменный MIME после рестарта, потеря SMTP DATA-ответа после accept и локальное подавление дубликата.
-8. Реальный HTTP relay smoke: недоступность получателя, SIGKILL relay, восстановление, конкурентные повторы, 409/401 и разрыв TCP после commit с перезапуском Notifications/relay.
-
-Используется отдельный Compose-проект `event-registration-ci` и `.env.example`; настоящие секреты и дополнительные сервисы GitHub не нужны. Все три опубликованных порта устанавливаются в `0`, Docker выбирает свободные; адрес frontend берётся через `docker compose port`. Это позволяет выполнять те же команды рядом с обычным локальным приложением. Добавлен один notifications-sender; Redis/Celery не используются.
-
-При ошибке выводятся состояния контейнеров и последние логи. Очистка CI-проекта с его volumes выполняется всегда; ошибка проверки не превращается в успешный результат. Checkout закреплён SHA, разрешения токена ограничены чтением репозитория, сохранение credentials отключено.
-
-Локально те же проверки можно выполнить, установив переменные из `jobs.checks.env` workflow и последовательно выполнив его `run`-шаги. Для завершения используйте `docker compose down --volumes --remove-orphans` **при тех же CI-переменных**, чтобы удалить только CI-окружение. Настоящий запуск на GitHub подтверждается после публикации workflow; локальный прогон не является запуском GitHub Actions.
-
-## Структура и дальнейшие шаги
-
-`backend/app/api` содержит HTTP, `services` — реализованные бизнес-операции, `db` — SQLAlchemy и соединения, `notifications` внутри backend — реализованную постановку outbox и фиксацию payload перед HTTP. Отдельный проект `notifications/` содержит идемпотентный внутренний HTTP-приём, фиксацию MIME и асинхронный SMTP sender. Доменные операции не вызывают SMTP и не зависят от способа выбора заданий worker. Пустой исходный `main.py` в корне не используется; точка входа API находится в `backend/app/main.py`.
-
-Реализованы HTTP relay неизменяемого payload и идемпотентный приём в Notifications; контракт и гарантии описаны в [NOTIFICATION_PROTOCOL.md](docs/NOTIFICATION_PROTOCOL.md). Реализованы MIME/SMTP с повторами, сбоями после SMTP accept и доставкой напоминаний/переносов; [правила и ручной retry](docs/SMTP_DELIVERY.md). Пользовательские экраны и SSE реализованы. Далее: пользовательское ревью, финальная сдача, описание улучшений и отдельное ESSAY.md из 10 предложений. Регистрация, FIFO, чекин и транзакционная постановка уведомлений уже реализованы и покрыты тестами. Обязательные пункты PDF сохранены в REQUIREMENTS.md.
-
-Сейчас работает один последовательный HTTP relay Core (`python -m app.worker`); Notifications сохраняет принятые задания, отдельный `notifications-sender` фиксирует MIME и отправляет через aiosmtplib в Mailpit. Relay использует httpx AsyncClient без открытой DB-транзакции, сохраняет попытки/backoff и помечает HTTP 202 как forwarded, а не sent. SMTP sender также один последовательный процесс; его запуск не зависит от HTTP API или доступности Mailpit. `sent` означает SMTP accept, не exactly-once. Для будущего роста предусмотрен [план конкурентной обработки](docs/WORKER_EVOLUTION.md): `FOR UPDATE SKIP LOCKED`, leases и идемпотентность добавляются в выбор/завершение outbox-задач. Регистрация и FIFO при этом остаются в прежних транзакциях. Эти механизмы, Redis и Celery сейчас не реализованы.
-
-Занятое мероприятие не блокирует всю рассылку: relay перебирает ограниченную страницу голов разных событий, пропускает недоступный event-lock через NOWAIT и возвращается к нему в следующем обходе. RELAY_CANDIDATE_LIMIT задаётся в .env (default 20). При полностью занятой странице worker делает паузу; участники FIFO и prepared payload остаются под прежними правилами.
-
-## Проверка backend перед frontend — 2026-10-23
-
-На отдельном Compose project с tmpfs PostgreSQL/Mailpit прошли Ruff, форматирование, Mypy, все **331 Pytest-тест (186 Core + 124 Notifications + 21 infrastructure)**, явные Alembic upgrade/downgrade base/upgrade/check обеих БД, сборка и запуск. API smoke подтвердил регистрацию/IDN-повтор, FIFO/отмену/resume, версии переноса, 422/401, однократный чекин и реальные письма. Все существующие HTTP/SMTP fault-сценарии CI выполнены: outage, SIGKILL/restart, потеря ответа после HTTP commit и SMTP accept, неизменность MIME, дедупликация в текущем Mailpit store. Два API-процесса проверяют гонки; отрицательные контроли подтверждают чувствительность email/security регрессий. Команды/границы и фактическое время — [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md). Основная установка не менялась; удалённый GitHub Actions этим не подтверждается.
-
-## Интерфейс и проверка двумя клиентами
-
-Список `/` и страница `/events/{id}` показывают описание, дату/время Алматы, доступность мест и форму email. Ответ регистрации всегда нейтральный: он не сообщает о существовании адреса и не подтверждает доставку письма или выделение места. Нет придуманных названий, мест проведения, категорий и фото.
-
-В `/organizer` введите существующий ORGANIZER_TOKEN из вашего .env (в изолированном тестовом окружении — примерный ключ из .env.example). Создайте событие с лимитом 1. Откройте его публичную страницу в двух независимых браузерных контекстах, зарегистрируйте два тестовых email и найдите письма в Mailpit. Откройте приватную ссылку из первого письма каждого участника: один получит билет, второй увидит ожидание без билета и выдуманной позиции. Отказ подтверждённого участника продвинет первого ожидающего; он получит письмо с билетом. Восстановление вернёт отменённого в конец очереди при отсутствии места.
-
-В рабочем пространстве `/organizer/events/{id}` доступны перенос даты и три счётчика; `/organizer/events/{id}/check-in` — ввод кода и результат проверки. Чекин разрешён **с начала** события: чтобы проверить его вручную, сначала создайте/зарегистрируйте участников, затем перенесите событие на ближайшее будущее и дождитесь начала. Один билет нельзя отметить дважды; после успеха поле очищается и получает фокус. Дата и счётчики обновляются без reload, после разрыва связи приходит актуальный снимок.
-
-Ссылка участника содержит token во fragment: он сразу удаляется из адреса и используется только в Authorization. Смена fragment в той же вкладке тоже обрабатывается. Токен и ключ организатора — только в памяти, не в localStorage/sessionStorage/history state; после перезагрузки откройте приватную ссылку заново или снова введите ключ. Публичный повтор email не присылает новую секретную ссылку. Часовой пояс всех дат/полей явно Алматы (UTC+5), независимо от зоны компьютера.
-
-### Отдельное окружение браузерных тестов
-
-Чтобы не затрагивать обычную БД/volumes:
+For actual browser verification with Node 24 installed:
 
 ```sh
-scripts/browser-test.sh start
-scripts/browser-test.sh urls
+BROWSER_TEST_PROJECT="$COMPOSE_PROJECT_NAME" scripts/browser-test.sh start
+BROWSER_TEST_PROJECT="$COMPOSE_PROJECT_NAME" scripts/browser-test.sh test
+BROWSER_TEST_PROJECT="$COMPOSE_PROJECT_NAME" scripts/browser-test.sh stop
 ```
 
-Скрипт использует .env.example, собственные image tags и project `event-registration-relay-check-ui-local`, PostgreSQL/Mailpit **в tmpfs**, свободные порты. Базовые бизнес-данные не копируются. Порт сайта сохраняется при пересборке; PUBLIC_APP_URL sender настраивается на фактический адрес до его запуска, поэтому ссылка в письме ведёт в этот же тестовый сайт. Новые MIME не готовятся со старым адресом, ранее сохранённые MIME не переписываются.
+The script prints the temporary site/Mailpit addresses and uses the public test-only organizer key from `.env.example`. Stop removes only that temporary project's containers/network; tmpfs data disappears. It does not delete main volumes. Browser screenshots are taken only after page-specific data loads and fonts settle; then width/overflow is checked. Traces/video are disabled to avoid recording private tokens.
 
-Для frontend-проверок нужны Node 24/npm и Chromium/Chrome:
+[GitHub Actions](.github/workflows/ci.yml) runs static checks, all service/infrastructure tests, migration checks, frontend builds, real HTTP/SMTP failure scenarios, edge admission checks and Playwright. Exact locally executed commands, failures and final counts are recorded in [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md); a local run is not a claim that the remote workflow ran.
 
-```sh
-scripts/browser-test.sh test
-# Если используется уже установленный Chrome, можно задать PLAYWRIGHT_CHROMIUM_EXECUTABLE.
-# Остановить только тестовый проект (tmpfs-данные исчезнут):
-scripts/browser-test.sh stop
-```
+## Limits and next improvements
 
-Можно задать BROWSER_TEST_PROJECT, но разрешён только префикс `event-registration-relay-check-ui-`. Test-скрипт получает адреса из своего Compose, не принимает произвольный целевой сайт; настоящее .env не используется. Для обычного запуска с постоянными данными остаётся `docker compose up --build`; при изменении FRONTEND_PORT задайте соответствующий PUBLIC_APP_URL. Не используйте browser-test overlay с основным именем проекта.
+- Shared organizer key, no per-organizer accounts/RBAC, and no recovery flow for a lost private link. The first email remains the source of that link.
+- Fixed capacity after creation, code entry instead of a QR scanner, offset pagination without a historical snapshot during concurrent rescheduling.
+- One active relay/sender. SSE is shared per event **per API process**; multiple processes still rely on PostgreSQL for business synchronization. Ingress budgets are local to one Nginx and need retuning behind a trusted production proxy.
+- Stored MIME is immutable, even after cancellation/rescheduling. SMTP acceptance is not end-recipient delivery and cannot guarantee exactly-once. Safe manual retry explicitly acknowledges duplicate risk.
+- Local measurements with 1000 SSE connections are **not** proof of 1000 registrations per second or a production SLA. Registration latency/queue delay varied; longer arrival-rate/soak tests on target hardware are still needed. [Method and raw measurements](docs/LOAD_TESTING.md).
+- Production needs HTTPS, real SMTP/TLS credentials and domain reputation, trusted ingress rules, backups plus a restore drill, monitoring/alerts and time synchronization. External SMTP and CD have not been deployed.
+- Final handover still requires reviewer acceptance, an approved commit/push of this working copy and a remote CI result. No commit or push is performed by this readiness task.
 
-Из `frontend/`: `npm run format:check`, `npm test`, `npm run build`. Dockerfile выполняет эти проверки при сборке. E2E (`npm run test:e2e`) требует переменные E2E_BASE_URL/E2E_MAILPIT_URL/E2E_ISOLATED_PROJECT/E2E_ORGANIZER_KEY; проще использовать скрипт выше. Playwright trace/video отключены, чтобы не записывать Authorization и приватные ссылки. Unit изолирует HTTP-границу; успешные бизнес-операции E2E выполняются настоящими Core/Notifications/Mailpit.
+## AI and implementation provenance
 
-### Результаты frontend-этапа — 2026-10-23
+The project was developed with an AI coding assistant in **Codex desktop**, with architecture decisions reviewed by the user. The session identifies the assistant as GPT-6 based; the precise serving model/build was not independently captured in repository metadata, so no more specific model name or comparison is claimed. The tool was chosen for working directly with source, tests, containers and reviewable diffs; generated changes were verified rather than treated as evidence by themselves.
 
-В отдельном `event-registration-relay-check-ui-20261023` прошли **189 Core + 124 Notifications + 21 infrastructure Pytest-тест (334)**, Ruff/format/Mypy, миграционные round-trip/check, frontend Prettier/**17 Vitest**/TypeScript/Vite и **4 Playwright E2E в настоящем Chrome**. Два независимых клиента проверяют последнее место/очередь/отказ/продвижение/восстановление/письма Mailpit/билет/два конкурентных чекина/live; также проверены повтор email, перенос, неверная ссылка, HTTP409, сеть и переподключение. Просмотрены узкие/широкие скриншоты. Реальное отключение SSE выявило ошибку cleanup asyncpg; добавлены ограниченный cancellation shield и PostgreSQL-регрессия. После исправления повторные E2E и инспекция runtime логов прошли. Удалённый GitHub Actions и дополнительные браузеры не запускались; На этом историческом этапе Playwright запускался локально; включён в CI 2026-10-24. Полные команды и промежуточные неудачи сохранены в DEVELOPMENT_LOG.
-
-## Надёжность и нагрузка — 2026-10-24
-
-Доступность регистрации/отмены/resume/переноса/чекина определяется server_time из настоящего SSE, с отсчётом performance.now. Часы устройства не используются. При первоначально неизвестном времени/потере связи действия отключены; свежий снимок восстанавливает их. Временный отказ начального REST GET не мешает восстановиться через SSE; 404 не скрывается.
-
-SSE разделяет один запрос в секунду на мероприятие на каждый API-процесс между всеми его подписчиками. Очередь клиента ограничена последним снимком; после последнего disconnect producer закрывается. UI не перечитывает private GET на каждый heartbeat: обновляет по изменению снимка/reconnect, а редкое изменение без изменения итоговых чисел — fallback до10s. Счётчики по-прежнему обновляются каждым снимком.
-
-Массовый перенос использует три SQL-операции outbox в той же event-locked транзакции; freeze/dedup/reminder/FIFO не меняются. Миграция0005 добавляет только индексы starts_at/id и outbox.registration_id, сохраняет24 поля и данные, downgrade удаляет только индексы. На большой production-таблице обычный CREATE INDEX требует планирования окна обслуживания; concurrent indexes потребуют отдельного эксплуатационного решения.
-
-Один активный sender/relay теперь обеспечен PostgreSQL session advisory mutex и проверкой соединения-владельца, а не только договорённостью оператора. HTTP/SMTP выполняются без открытой SQL-транзакции; сохраняются retry, immutable payload/MIME и риск SMTP-дубликата после accept. [Диагностика, безопасный retry, ограничения и подготовка production](docs/OPERATIONS.md).
-
-Nginx ограничивает регистрацию по настоящему remote_addr (30r/s, burst1000), SSE общим бюджетом2000 без маленького per-IP cap. Входные proxy headers перезаписываются. API имеет отдельный per-process SSE budget2000; API_WORKERS по умолчанию1. Значения — настройки демонстрационной установки, не результат доказанной production capacity. Публичный список ограничен страницами по20 записей, навигация есть в обоих разделах.
-
-CI включает Playwright с настоящими PostgreSQL/Mailpit в tmpfs, Node24/Chromium, ожиданием health и always-cleanup. Ранее реализованные HTTP/SMTP fault-scripts сохранены и запускаются перед E2E. PUBLIC_APP_URL сохраняется между шагами CI, чтобы после restart sender письма вели в фактический тестовый сайт. Команды/результаты текущего этапа — DEVELOPMENT_LOG; нагрузка — [методика и измерения](docs/LOAD_TESTING.md). Удалённый GitHub Actions не запускается без разрешённого push.
-
-Фактически проверено 24 октября: **196 Core + 128 Notifications + 21 infrastructure = 345 Pytest**, Ruff/format/Mypy, Alembic upgrade/downgrade/check обеих БД, сохранность заполненной БД при0005, **18 Vitest + TypeScript/Vite + 9 Chrome E2E**. Реальные HTTP/SMTP outage/crash/потеря подтверждения, heartbeat/queue checks и edge-ограничения также прошли. При1000 SSE и двух API-процессах ошибок нет; это не1000 регистраций/сек. Перенос/SSE стали дешевле по локальным замерам, ускорение регистрации не доказано, один прогон очереди заметно медленнее — цифры и ограничения сохранены в нагрузочном отчёте.
-
-### Исправления финального аудита — 24 октября
-
-Исправлены повторное подключение SSE после SQL-ошибки PostgreSQL, неполные критерии load probe, гонка ожидания E2E-пагинации и локальные часы в индикаторе мероприятия. Список возвращает `server_time`; список и страница используют только серверное время, при неизвестном времени индикатор нейтрален. Строгий probe теперь отклоняет частичный успех/неверные SSE/ошибки очереди, а старые замеры явно отмечены как исторические с более слабыми проверками.
-
-Повторные проверки: **199 Core + 128 Notifications + 32 infrastructure = 359 Pytest**, Ruff/format/Mypy/Alembic, **22 Vitest**, TypeScript/Vite, **11 Chrome E2E** и5 дополнительных повторов пагинации. Реальный строгий прогон200POST/1000SSE/2API прошёл;400 писем доставлены Mailpit. Это не гарантированная production capacity. Детали — [DEVELOPMENT_LOG](DEVELOPMENT_LOG.md), [LOAD_TESTING](docs/LOAD_TESTING.md).
-
-## Что остаётся перед сдачей
-
-Основные экраны и SSE реализованы; автоматическая приёмка независимых браузерных клиентов описана в DEVELOPMENT_LOG. Это не финальная сдача всего проекта.
-
-- Пользовательское ревью внешнего вида и сценариев; при необходимости — проверка дополнительных браузеров/assistive technologies (автоматизированный прогон выполнен в Chrome).
-- Чистый clone/запуск на машине приёмки, проверка GitHub-доступности и согласование коммитов/push.
-- Уточнение точной модели, окончательное описание улучшений и отдельное эссе из 10 предложений (требование пользователя, не PDF).
-- Production RBAC, восстановление потерянной ссылки, масштабирование и exactly-once внешней SMTP-доставки в текущий объём не входят.
-
-## Решения, происхождение и AI
-
-Архитектура и причины выбора: [ARCHITECTURE.md](ARCHITECTURE.md), [DECISIONS.md](DECISIONS.md). Реальный ход работы с метками Asia/Almaty: [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md). Проверяемые требования: [REQUIREMENTS.md](REQUIREMENTS.md).
-
-Код и документы подготовлены совместно с AI-агентом в Codex desktop; пользователь выбирает стек, принимает архитектуру и проверяет этапы. В доступном системном описании агент основан на GPT-6, точное имя обслуживающей версии не подтверждено; перед сдачей его необходимо сверить с настройкой сессии. Выбор среды обусловлен совместной работой с локальными файлами, терминалом и проверками; сравнительный эксперимент моделей не выполнялся.
-
-Чужое приложение за основу не использовалось. Каркас написан вручную агентом, без генератора Vite/FastAPI; используются стандартные библиотеки из manifests и стандартный шаблон Alembic для дальнейших миграций. Публичная публикация/ссылка GitHub, итоговое эссе и окончательная приёмка всего кейса относятся к последующим этапам.
+No third-party application was copied as a starting solution, and no Vite/FastAPI scaffold generator was used. Standard dependencies are listed and pinned in the manifests/lockfiles. [DECISIONS.md](DECISIONS.md) and [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) preserve the recorded progression and actual Almaty timestamps. The separate [ten-sentence reflection](ESSAY.md) is a user-requested deliverable, not a requirement found in the PDF.

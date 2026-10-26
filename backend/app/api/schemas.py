@@ -20,9 +20,9 @@ class CreateEvent(InputModel):
     @classmethod
     def nonempty_description(cls, value: str) -> str:
         if "\x00" in value:
-            raise ValueError("Описание не должно содержать нулевой символ")
+            raise ValueError("Description must not contain a null character")
         if not value.strip():
-            raise ValueError("Описание не должно быть пустым")
+            raise ValueError("Description must not be empty")
         return value.strip()
 
 
@@ -46,9 +46,9 @@ class CheckIn(InputModel):
     @classmethod
     def no_null_character(cls, value: str) -> str:
         if "\x00" in value:
-            raise ValueError("Код билета не должен содержать нулевой символ")
+            raise ValueError("Ticket code must not contain a null character")
         return value
 
 
 class RegistrationAccepted(BaseModel):
-    message: str = "Если регистрация создана, сведения придут на почту"
+    message: str = "If a registration is created, details will be sent by email"

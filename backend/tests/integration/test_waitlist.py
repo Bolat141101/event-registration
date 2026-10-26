@@ -20,7 +20,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 async def committed_event(integration_engine: AsyncEngine) -> AsyncIterator[UUID]:
     async with AsyncSession(integration_engine, expire_on_commit=False) as session, session.begin():
         item = Event(
-            description="Проверка очереди",
+            description="Waitlist check",
             starts_at=datetime.now(UTC) + timedelta(days=2),
             capacity=1,
         )

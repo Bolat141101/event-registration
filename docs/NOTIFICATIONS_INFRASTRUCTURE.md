@@ -1,135 +1,65 @@
-# Core и Notifications: инфраструктура, HTTP и SMTP
+# Core and Notifications infrastructure
 
-Это согласованное пользователем архитектурное решение, а не дополнительное обязательное требование PDF. Core остаётся в `backend/`, React — в `frontend/`; новый независимый Python-проект находится в `notifications/`.
+The approved split uses two FastAPI/AsyncSession/asyncpg services and one PostgreSQL instance with **separate databases and ordinary roles**. This document describes current infrastructure, not the historical stage before HTTP relay/SMTP were implemented.
 
-## Реализовано сейчас
+## Containers and data ownership
 
-- Публичные Core API, бизнес-правила, routes и прежние миграции сохранены. Worker теперь выполняет HTTP relay; новая Core revision 0003 расширяет состояния outbox без добавления колонок.
-- Notifications: FastAPI, AsyncEngine/AsyncSession, asyncpg, собственные зависимости/lock-файлы, Dockerfile, Alembic и тесты.
-- Notifications предоставляет GET /health и защищённый POST /internal/v1/notifications. Задания фиксируются в собственной БД до 202; дубликат идентичного JSON безопасен, другой JSON с тем же ID даёт 409.
-- Один PostgreSQL хранит две независимые прикладные БД; отдельного PostgreSQL-контейнера для Notifications нет.
-- Core и Notifications проверяют только свою БД и свою Alembic revision. Core не зависит от процесса Notifications и его healthcheck.
-- Отдельный bootstrap работает поверх уже существующего PGDATA. Init-скрипт для пустого volume не используется.
-- CI сохраняет все Core/frontend проверки и добавляет проверки Notifications, изоляции ролей и доступности Core при остановленном Notifications.
+| Service | Responsibility |
+| --- | --- |
+| db | PostgreSQL; persistent main storage, tmpfs in guarded test projects |
+| db-bootstrap | Repeatable administrative creation/role isolation, no row deletion |
+| migrate | Core Alembic upgrade, then exit0 |
+| api | Existing asynchronous business API and public SSE |
+| worker | Core outbox HTTP relay |
+| notifications-migrate | Independent Notifications Alembic upgrade, then exit0 |
+| notifications | Protected durable internal inbox and health |
+| notifications-sender | MIME preparation and async SMTP submission |
+| frontend | Built React application and Nginx proxy |
+| mailpit | Local SMTP emulator and inbox, not an external mail provider |
 
-HTTP relay, MIME rendering/freezing и async SMTP sender реализованы. Kafka, Redis, новый UI и SSE не добавлены. HTTP 202 означает только приём, Notifications sent — SMTP accept. [SMTP и ручной retry](SMTP_DELIVERY.md). Подробный версионированный контракт и обработка устаревших снимков — [NOTIFICATION_PROTOCOL.md](NOTIFICATION_PROTOCOL.md).
+Core's default database is event_registration with role core_app. Notifications uses event_notifications with role notifications_app. The administrator events is for bootstrap, not API traffic. Application roles have no superuser/createdb/createrole/replication/bypassrls privileges or inherited memberships. Each owns only its database/schema objects and cannot CONNECT to the other's database. PUBLIC CONNECT/schema privileges are restricted and default privileges stay isolated. Superusers remain administrative exceptions; two databases on one server do not isolate infrastructure outages.
 
-## Владение данными и граница сервисов
+Core owns events/registrations/email_outbox. Notifications owns notification_jobs with seven fields: id,payload,mime nullable,status,available_at,attempts,last_error nullable. No cross-database FK/shared ORM or direct Core query from Notifications is allowed. The nullable MIME field is the second freeze boundary, not an unimplemented planned feature.
 
-```mermaid
-flowchart LR
-    F[React / Nginx] --> C[Core API]
-    W[Core HTTP relay] --> CD
-    W -->|HTTP JSON v1| N
-    C --> CD
-    N[Notifications internal API] --> ND
-    subgraph PG[Один PostgreSQL]
-      CD[(event_registration · core_app)]
-      ND[(event_notifications · notifications_app)]
-    end
-    S[Notifications sender] --> ND
-    S -->|async SMTP| M[Mailpit]
-```
+## Settings
 
-Core владеет events, registrations и email_outbox (24 колонки). READ COMMITTED, event SELECT FOR UPDATE, отдельный MAX(waitlist_seq)+1 после lock, FIFO-продвижение внутри отмены, версии участия/переносов, билеты, токены и чекин не меняются. Никакого сетевого вызова из бизнес-транзакции не добавлено.
+.env.example contains public local examples only. Keep actual credentials in untracked .env and use distinct passwords/keys. Core Settings needs asyncpg DATABASE_URL and ORGANIZER_TOKEN; worker additionally receives NOTIFICATIONS_URL/internal token/relay settings. Notifications API/sender use their own DATABASE_URL/internal key; SMTP/public URL settings belong only to the sender. Core has no SMTP configuration.
 
-По последнему уточнению пользователя Core relay передаёт **неизменяемый payload**, а **Notifications формирует и сохраняет MIME**. Подготовка Core payload и фиксация Notifications MIME — разные этапы, не leases. После сохранения MIME повторная отправка должна использовать прежние байты/Message-ID; это реализовано и проверено на настоящем Mailpit, включая потерю SMTP ACK. Перед первой HTTP-попыткой Core фиксирует envelope v1 и prepared_at под event-lock; после этого payload не меняется. HTTP acceptance отмечается forwarded, не sent. Legacy prepared payload поддерживается как плоский v1-контекст без перезаписи; некорректный legacy payload остаётся failed с диагностикой.
+The internal Notifications API and both SMTP ports are not exposed as public service APIs. Nginx publishes the application on localhost; Mailpit's inbox is separately bound to localhost. Changing the frontend port requires the matching PUBLIC_APP_URL before preparing emails. See README for actual defaults/addresses.
 
-## Базы и права
+Settings repr excludes DSNs/tokens and sensitive URLs. Text ValidationError hides input values while preserving field/cause diagnostics and a nonzero startup exit. It does not sanitize model_dump/errors()/json() or third-party collectors of environment/locals: do not log those structures. SQLAlchemy runtime/Alembic hide bind parameters.
 
-| Назначение | БД по умолчанию | Роль |
-|---|---|---|
-| Core API, Core migrations, существующий worker | event_registration | core_app |
-| Notifications и его миграции | event_notifications | notifications_app |
-| Bootstrap и резервные копии | postgres / нужная БД | прежний POSTGRES_USER, локальный технический администратор |
+## Existing volume: bootstrap without deleting data
 
-Обе прикладные роли: LOGIN, NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION, NOBYPASSRLS. Bootstrap отказывается переиспользовать привилегированную роль или роль с членством в других ролях. Имена двух БД/ролей должны отличаться, прикладные роли не могут совпадать с администратором.
+Docker entrypoint initialization runs only on an empty PGDATA directory, so a second database cannot rely solely on initdb scripts. The independent db-bootstrap container runs the actual shell/SQL every requested bootstrap, including an existing volume.
 
-На обеих БД отзывается доступ PUBLIC и чужой прикладной роли. Каждая роль владеет собственной БД/схемой и известными прикладными таблицами. PostgreSQL возвращает 42501 при попытке подключиться к чужой БД. Межбазовых FK, FDW и общих ORM-моделей нет. Технический администратор сохраняет доступ к обеим БД; сервисные контейнеры не получают его пароль.
+The scripts validate distinct names/roles, refuse to repurpose privileged roles/memberships, create missing ordinary roles/databases, set their passwords, configure ownership/CONNECT/TEMP/schema/default privileges, and preserve all application rows. Object ownership is transferred only within the intended schemas. SQL uses psql variables/format identifier/literal quoting rather than shell-interpolated SQL.
 
-Bootstrap использует SQL format(%I/%L) и psql-переменные для безопасного quoting, не вставляет секреты в shell SQL и не выводит их. ALTER OWNER выполняется адресно для известных таблиц, без REASSIGN OWNED всего кластера. Скрипты не удаляют строки/таблицы/БД и не вызывают initdb.
-
-Один PostgreSQL остаётся общей точкой отказа и общим ресурсом CPU/диска. Разные БД/роли обеспечивают изоляцию доступа, но не аппаратную отказоустойчивость.
-
-## Таблица Notifications
-
-```text
-notification_jobs:
-  id            UUID PK, NOT NULL, без default — Core outbox UUID
-  payload       JSONB NOT NULL — неизменяемый envelope v1
-  mime          BYTEA NULL — неизменяемый MIME после первого prepare
-  status        VARCHAR(12) NOT NULL DEFAULT 'pending'
-  attempts      INTEGER NOT NULL DEFAULT 0
-  available_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-  last_error    TEXT NULL
-```
-
-Семь колонок; status — pending/sent/failed, attempts >= 0, payload — JSON-объект, непустой MIME при наличии, sent требует MIME. Частичный индекс pending по available_at/id. Нет recipient/kind/версий отдельными колонками: они входят в типизированный payload. PK вместе с INSERT ON CONFLICT и сравнением нормализованного JSON обеспечивает идемпотентный приём; SMTP отдельно реализован sender, а не самим наличием колонок.
-
-Notifications имеет собственный alembic_version и revision `0001_notification_jobs`; Core использует `0004_canonical_email` (предыдущие revisions сохранены); [проверка коллизий](EMAIL_CANONICALIZATION.md). Downgrade Notifications на base разрешён только при пустой notification_jobs; при наличии заданий он явно останавливается, чтобы не уничтожить данные. На рабочей БД downgrade не запускать.
-
-## Запуск и обновление существующего volume
-
-Переменные `.env.example`:
-
-```text
-POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD — существующая БД и администратор
-CORE_DB_USER, CORE_DB_PASSWORD — обычная роль Core
-NOTIFICATIONS_DB, NOTIFICATIONS_DB_USER, NOTIFICATIONS_DB_PASSWORD — вторая БД/роль
-```
-
-Существующий `.env` не перезаписывать. Для новых переменных предусмотрены локальные defaults, совпадающие с `.env.example`, чтобы старый файл продолжил работать. Для своего окружения задайте отдельные пароли; в Compose DSN используйте URI-safe символы, как для прежнего Core URL. Примерные пароли не подходят для публикации сервиса.
-
-Перед обновлением сохраните приватный дамп вне Git и резервную копию ролей. Затем:
+Do not delete/recreate a volume to add Notifications. Before a real upgrade, take a backup and review current settings:
 
 ```sh
+docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > /tmp/core-before-upgrade.dump
 docker compose build api notifications
-docker compose up -d --wait --wait-timeout 120
+docker compose run --rm db-bootstrap
+docker compose run --rm migrate
+docker compose run --rm notifications-migrate
+docker compose up --no-build -d --wait api worker notifications notifications-sender frontend mailpit
 ```
 
-Порядок: db healthy → db-bootstrap exit 0 → две независимые миграции → api/worker и notifications/notifications-sender; отправитель не зависит от Mailpit readiness. Frontend зависит только от Core API. Bootstrap также можно вызвать явно:
+These are operator instructions, not steps executed on the main data during verification. A database dump contains private data; keep it outside Git and protect it. For a previously deployed sender/writer, coordinate stop/start and schema-specific preflight as described in [canonicalization](EMAIL_CANONICALIZATION.md). Changing the .env administrator password alone does not rotate an existing PostgreSQL server password. Application role passwords are set when bootstrap runs.
 
-```sh
-docker compose run --rm --no-deps db-bootstrap
-```
+## Readiness and lifecycle
 
-Для явного вызова БД уже должна работать. Bootstrap можно повторять: он сохраняет строки, UUID, билеты, хеши токенов, очередь, outbox, MIME и версии Alembic. Он создаёт отсутствующую вторую БД, обновляет пароли прикладных ролей из настроек, меняет права и владельцев. Пароль технического администратора этим скриптом не меняется. Если POSTGRES_PASSWORD в .env не соответствует уже созданному пользователю, bootstrap завершится ошибкой авторизации; удалять volume для исправления нельзя.
+Core /api/health checks its DB and expected Alembic head; Notifications /health checks its own. HTTP200 means ready,503 means unavailable/stale schema with safe diagnostics. Core does not depend on Notifications/SMTP readiness. Frontend waits only for Core; workers recover persisted jobs independently. Worker/sender heartbeat health checks real loop liveness, not successful mail delivery.
 
-Имена существующих БД/ролей не являются инструкцией переименования: при смене этих настроек могут появиться другие БД/роли, прежние не удаляются. Сохраняйте POSTGRES_DB для работы с существующими данными. Откат Core к суперпользователю не требуется: исходный код работает с обычной ролью без изменений. Удаление Notifications из запуска не должно сопровождаться удалением его БД.
+Core head0005_scale_indexes keeps24columns and adds indexes only. Notifications head0001_notification_jobs keeps7columns. No existing migration is rewritten; downgrade/check regression commands run only on dedicated test databases. Some historical destructive downgrades explicitly require empty tables instead of inventing lost data.
 
-Проверки:
+## Isolated verification
 
-```sh
-docker compose ps --all
-docker compose exec -T api alembic check
-docker compose exec -T notifications alembic check
-docker compose exec -T notifications python -c 'import urllib.request; print(urllib.request.urlopen("http://localhost:8000/health", timeout=5).read().decode())'
-docker compose stop notifications
-curl --fail http://localhost:8080/api/health
-curl --fail http://localhost:8080/api/events
-docker compose up --no-build --no-deps -d --wait notifications
-```
+Test services use tmpfs PostgreSQL/Mailpit and distinct databases ending _test. Core executes as core_app_test, not the admin; its fixture rejects privileged roles/memberships. Notifications tests use notifications_app_test. The isolated bootstrap test alone has administrative access to create seeded rows, rerun the actual bootstrap and inspect roles/owners/privileges.
 
-Notifications не публикует host-порт и не проксируется frontend; healthcheck выполняется внутри контейнера. PostgreSQL и Mailpit сохраняют прежние volumes. Не удалять volumes при обновлении. Локально останавливать тестовые окружения командой down без --volumes.
+The repeated-bootstrap regression stores data in **both** databases, invokes bootstrap again, and verifies row preservation, owner/default privilege correctness and denial of cross-service access. Infrastructure delivery tests then exercise both services without weakening isolation.
 
-## Тесты
+The browser overlay also replaces runtime volumes with tmpfs and requires the `event-registration-relay-check-ui-` prefix. scripts/browser-test.sh uses .env.example, random ports, real readiness and sets the sender's PUBLIC_APP_URL to the actual frontend origin. It preserves an already running test port during rebuild so frozen links stay valid. Never combine that overlay with the main project's name.
 
-```sh
-docker compose --profile test build test notifications-test bootstrap-test
-docker compose --profile test run --rm test
-docker compose --profile test run --rm notifications-test
-docker compose --profile test run --rm bootstrap-test
-docker compose --profile test run --rm --no-deps notifications-test ruff check .
-docker compose --profile test run --rm --no-deps notifications-test ruff format --check .
-docker compose --profile test run --rm --no-deps notifications-test mypy notifications_app
-```
-
-test-db — отдельный PostgreSQL в tmpfs, без основного volume. test-db-bootstrap создаёт обычные роли core_app_test и notifications_app_test и изолирует две тестовые БД. Теперь Core test-сервис по умолчанию выполняет и миграции, и весь Pytest под core_app_test, без административных credentials; его PostgreSQL-фикстура проверяет имя роли, отсутствие SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS и членства в других ролях. Notifications-тесты проверяют собственную схему, AsyncSession/rollback, UUID/constraints, оба направления запрета доступа, непривилегированные роли, health и безопасный round-trip миграции только в *_test.
-
-Автоматический тест `infrastructure/tests/test_bootstrap.py` запускается отдельным bootstrap-test. Это единственный Python test-контейнер с тестовыми административными credentials; они нужны для выполнения настоящего shell/psql bootstrap, а не для миграций или прикладных запросов. psql добавлен только в отдельный Docker target bootstrap-test; runtime и обычный Core test-образ не увеличены. Скрипты, тест и Notifications смонтированы read-only; Docker socket не передаётся.
-
-Тест сначала проверяет точные тестовые имена БД/ролей и PGHOST=test-db, затем применяет миграции каждой БД под её обычным владельцем. Создаёт подтверждённую, ожидающую и отменённую регистрации, билет/чекин, версии участия/события, pending/sent/failed outbox и задания Notifications с сохранёнными MIME и ошибкой повторной попытки. Два повторных запуска bootstrap должны сохранить все строки обеих БД, включая alembic_version, владельцев БД/схемы/таблиц/индексов, ACL, определения индексов/constraints. Проверяются эффективные права на собственные объекты, отсутствие PUBLIC-доступа и чужих CONNECT/CREATE/TEMP, реальные отказы соединения 42501 в обоих направлениях до и после повторов. Очистка удаляет только UUID этого теста.
-
-Наборы Core → Notifications → bootstrap-test выполняются последовательно: первые два делают downgrade/upgrade тестовых схем. Тест не воспроизводит остановку PostgreSQL/повреждение файловой системы и не доказывает атомарность bootstrap всего кластера: отдельные CREATE DATABASE не являются одной общей транзакцией.
-
-При предыдущем инфраструктурном этапе дополнительно вручную проверялись заполненные постоянные БД до/после первого и повторного bootstrap. Теперь повторяемость с данными проверяется автоматически в CI на tmpfs; штатный Core Pytest использует core_app_test. Дополнительно проверяются v1-контракт и сквозная потеря HTTP-ответа с двумя БД; SMTP не реализован. Фактические команды, числа тестов и времена находятся в DEVELOPMENT_LOG.md.
+Use the exact commands in README/.github/workflows/ci.yml. Smoke/failure scripts require explicit test-project guards; pause/kill/restart and migration downgrade belong only in those projects. Cleanup uses project-scoped down without deleting main volumes. Tests prove infrastructure isolation, not production HA, a backup policy or unlimited throughput.

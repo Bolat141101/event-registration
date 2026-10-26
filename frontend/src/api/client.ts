@@ -35,21 +35,20 @@ export class ApiError extends Error {
   }
 }
 const messages: Record<string, string> = {
-  invalid_email: 'Укажите корректный email.',
-  invalid_organizer_token: 'Ключ организатора не подходит.',
-  invalid_participant_token: 'Ссылка недействительна. Откройте ссылку из первого письма.',
-  authentication_required: 'Откройте приватную ссылку из письма.',
-  event_not_found: 'Мероприятие не найдено.',
-  already_checked_in: 'Этот билет уже отмечен.',
-  ticket_not_found: 'Действующий билет для этого мероприятия не найден.',
-  checkin_not_started: 'Отмечать участников можно с начала мероприятия.',
-  event_started: 'Мероприятие уже началось. Это действие больше недоступно.',
-  invalid_start_time: 'Выберите дату и время в будущем.',
-  participation_conflict:
-    'Участие изменилось. Проверьте актуальные данные перед следующим действием.',
-  schedule_version_conflict: 'Дата уже изменилась. Обновите данные и проверьте новое время.',
-  rate_limited: 'Слишком много запросов. Подождите немного и повторите попытку.',
-  database_unavailable: 'Сервис временно недоступен. Попробуйте ещё раз.',
+  invalid_email: 'Enter a valid email.',
+  invalid_organizer_token: 'The organizer key is incorrect.',
+  invalid_participant_token: 'Invalid link. Open the link from your first registration email.',
+  authentication_required: 'Open the private link from your email.',
+  event_not_found: 'Event not found.',
+  already_checked_in: 'This ticket has already been checked in.',
+  ticket_not_found: 'No valid ticket found for this event.',
+  checkin_not_started: 'Check-in opens when the event starts.',
+  event_started: 'The event has started. This action is no longer available.',
+  invalid_start_time: 'Choose a future date and time.',
+  participation_conflict: 'Participation changed. Check the current details before trying again.',
+  schedule_version_conflict: 'The date changed. Refresh the details and check the new time.',
+  rate_limited: 'Too many requests. Please wait a moment and try again.',
+  database_unavailable: 'The service is temporarily unavailable. Please try again.',
 };
 export async function request<T>(
   path: string,
@@ -75,7 +74,7 @@ export async function request<T>(
     throw new ApiError(
       0,
       'network',
-      'Нет связи с сервером. Проверьте подключение и повторите попытку.'
+      'No connection to the server. Check your connection and try again.'
     );
   }
   if (!response.ok) {
@@ -86,12 +85,12 @@ export async function request<T>(
       code,
       messages[code] ??
         (response.status === 422
-          ? 'Проверьте поля: описание, email, лимит и дату.'
+          ? 'Check the description, email, capacity and date.'
           : response.status === 404
-            ? 'Страница не найдена.'
+            ? 'Page not found.'
             : response.status === 401
-              ? 'Доступ не подтверждён. Проверьте ключ.'
-              : 'Не удалось выполнить действие. Обновите данные и попробуйте ещё раз.')
+              ? 'Access denied. Check your key.'
+              : 'Could not complete the action. Refresh and try again.')
     );
   }
   try {
@@ -100,7 +99,7 @@ export async function request<T>(
     throw new ApiError(
       response.status,
       'invalid_response',
-      'Не удалось прочитать ответ сервера. Обновите данные и попробуйте ещё раз.'
+      'Could not read the server response. Refresh and try again.'
     );
   }
 }

@@ -38,7 +38,7 @@ def normalize_email(value: str) -> str:
     try:
         return canonical_email(value)
     except ValueError as exc:
-        raise InvalidInput("invalid_email", "Укажите корректный email") from exc
+        raise InvalidInput("invalid_email", "Enter a valid email") from exc
 
 
 def token_hash(token: str) -> str:
@@ -54,13 +54,13 @@ async def lock_event(session: AsyncSession, event_id: UUID) -> Event:
             .execution_options(populate_existing=True)
         )
     if event is None:
-        raise NotFound("event_not_found", "Мероприятие не найдено")
+        raise NotFound("event_not_found", "Event not found")
     return event
 
 
 def require_before_start(event: Event, now: datetime) -> None:
     if now >= event.starts_at:
-        raise Conflict("event_started", "Мероприятие уже началось")
+        raise Conflict("event_started", "The event has started")
 
 
 def registration_view(entry: Registration) -> RegistrationView:
@@ -82,7 +82,7 @@ async def find_registration(session: AsyncSession, token: str) -> Registration:
         .execution_options(populate_existing=True)
     )
     if entry is None:
-        raise Unauthorized("invalid_participant_token", "Неверный токен участника")
+        raise Unauthorized("invalid_participant_token", "Invalid participant token")
     return entry
 
 
@@ -117,5 +117,5 @@ async def event_views(
 async def event_view(session: AsyncSession, event_id: UUID) -> EventView:
     views = await event_views(session, event_id)
     if not views:
-        raise NotFound("event_not_found", "Мероприятие не найдено")
+        raise NotFound("event_not_found", "Event not found")
     return views[0]

@@ -46,19 +46,19 @@ export function LoadState({ error, retry }: { error: Error | null; retry?: () =>
         <>
           <h1>
             {error instanceof ApiError && error.status === 404
-              ? 'Мероприятие не найдено'
-              : 'Не удалось загрузить данные'}
+              ? 'Event not found'
+              : 'Could not load data'}
           </h1>
           <Notice error>{error.message}</Notice>
           {retry && (
             <button className="secondary" onClick={retry}>
-              Попробовать ещё раз
+              Try again
             </button>
           )}
-          <Link href="/">Вернуться к афише</Link>
+          <Link href="/">Back to events</Link>
         </>
       ) : (
-        <p role="status">Загружаем…</p>
+        <p role="status">Loading…</p>
       )}
     </div>
   );
@@ -72,23 +72,23 @@ export function DateStamp({ value }: { value: string }) {
   );
 }
 export function Availability({ event, serverNow }: { event: EventInfo; serverNow: number | null }) {
-  if (serverNow === null) return <span className="availability">Уточняем статус</span>;
+  if (serverNow === null) return <span className="availability">Checking status</span>;
   const started = Date.parse(event.starts_at) <= serverNow;
   const free = Math.max(0, event.capacity - event.confirmed);
   return (
     <span className={`availability${!started && free ? ' available' : ''}`}>
-      {started ? 'Уже началось' : free ? `Свободно ${free} из ${event.capacity}` : 'Лист ожидания'}
+      {started ? 'Already started' : free ? `Available ${free} of ${event.capacity}` : 'Waitlist'}
     </span>
   );
 }
 export function Stats({ event }: { event: EventInfo }) {
   return (
-    <dl className="stats" aria-label="Статистика мероприятия">
+    <dl className="stats" aria-label="Event statistics">
       {(
         [
-          ['confirmed', 'Зарегистрировано'],
-          ['waitlisted', 'Ожидают'],
-          ['checked_in', 'Пришли'],
+          ['confirmed', 'Registered'],
+          ['waitlisted', 'Waiting'],
+          ['checked_in', 'Checked in'],
         ] as const
       ).map(([key, label]) => (
         <div key={key}>
@@ -104,10 +104,10 @@ export function LiveState({ status }: { status: 'connecting' | 'connected' | 'of
     <p className={`live-state ${status}`} role="status">
       <span aria-hidden="true" />
       {status === 'connected'
-        ? 'Обновляется автоматически'
+        ? 'Updates automatically'
         : status === 'connecting'
-          ? 'Подключаем обновления…'
-          : 'Связь прервана. Переподключаемся…'}
+          ? 'Connecting to live updates…'
+          : 'Connection lost. Reconnecting…'}
     </p>
   );
 }

@@ -1,120 +1,96 @@
-# Требования и приёмка: кейс №9 «Регистрация на мероприятия»
+# Requirements and acceptance evidence
 
-Статус на 2026-10-23: реализованы асинхронные Core API/сервисы, transactional outbox, HTTP relay, отдельный Notifications с MIME/SMTP и Mailpit. UI и SSE реализованы; браузерные сценарии проверяются Playwright с независимыми контекстами и настоящим Mailpit. Пользовательское ревью/финальная сдача ещё предстоят. Таблицы G/C ниже описывают требования и критерии; фактические подтверждения и оставшиеся пробелы — в матрице в конце. Это не объявление всего проекта готовым.
+Source: the unchanged [original PDF](<docs/Задания Agentic Developer (2).pdf>), general requirements on pages1–2 and **all of assignment9 on page9**. Rechecked on2026-10-26. The PDF is readable; no requirement was inferred from its filename alone. IDs below are project traceability labels, not numbering printed in the PDF.
 
-## Источники и границы
+Current implementation includes UI, SSE, HTTP relay and SMTP through Mailpit. A database column/constraint alone is not proof of business behavior. Historical verification belongs to [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md); the latest readiness run is recorded there, without declaring tests successful before execution.
 
-- Оригинал: [Задания Agentic Developer (2).pdf](docs/Задания%20Agentic%20Developer%20(2).pdf), 13 страниц. Общие требования — страница 1; «Что мы ожидаем от вас» — страницы 1–2; кейс №9 полностью — страница 9. Номера страниц отсчитываются от начала PDF.
-- PDF прочитан через извлечение текста; страницы 1, 2 и 9 дополнительно проверены визуально. SHA-256 оригинала: `3b7934746efef38066c6164c68df93ee6a0175c7ac7af8472372537a609539d7`.
-- Сообщения пользователя: предпочтительный стек, отсутствие платных сервисов и внешних API, Mailpit, качество кода, поэтапное согласование, Git-история и отдельное эссе из 10 предложений.
-- Требования других кейсов не входят в объём. В PDF нет требования эссе из 10 предложений; оно обязательно по указанию пользователя.
-- «Способ реализации» в таблицах — выбранный подход; готовность отмечена только в матрице подтверждений. Проектные уточнения в конце документа не являются цитатами из ТЗ.
+## Mandatory general PDF requirements
 
-## Общие требования PDF
+| ID | Requirement | Implementation | Verification |
+| --- | --- | --- | --- |
+| G01 | Separate backend and frontend communicating over a network | FastAPI services and React, HTTP through Nginx | Compose services, actual browser/API requests |
+| G02 | Backend language choice and reasons | Python, async FastAPI/SQLAlchemy/asyncpg | Manifests, architecture and decision record |
+| G03 | Vue or React frontend | React/TypeScript/Vite | Frontend manifests, production build, E2E |
+| G04 | Relational storage, preferably PostgreSQL | PostgreSQL, two isolated databases | Real integration tests and role isolation |
+| G05 | Accounts/login model may be chosen | Shared organizer key; private participation tokens; no accounts | Unauthorized/wrong-key tests, private-link flows |
+| G06 | Prompts or decision log delivered with code | DECISIONS and DEVELOPMENT_LOG | Files and traceable real timestamps |
+| G07 | AI use is expected and disclosed | README provenance and logs | Honest tool/model disclosure without invented metadata |
+| G08 | Deployment prerequisites documented | Docker/Compose, ports, initial downloads, settings | README and clean isolated startup |
+| G09 | Quick local startup | Compose bootstrap/migrations/health ordering | Build and start with empty tmpfs DB |
+| G10 | External services may be emulated | Mailpit local mail emulator; no paid runtime APIs | Actual SMTP submission and inbox inspection |
+| G11 | Works with two simultaneous clients | Independent participant/staff contexts, PostgreSQL locking | Two-process API tests and actual Chrome E2E |
+| G12 | Honest current state | Implemented features and explicit limitations | README, load report and readiness results |
+| G13 | Demonstrable correctness | Automated checks plus manual review scenario | Full service/infrastructure/frontend tests and smoke probes |
+| G14 | GitHub repository link | Actual origin in README | Read-only git remote/ls-remote verification |
+| G15 | State model/tool and why | Codex desktop disclosure, exact model uncertainty stated | README/DECISIONS; do not invent serving build |
+| G16 | Show gradual work over time | Git history and dated development/decision records | Existing commit history and original historical records |
+| G17 | Deployment/current-state description and next improvements | README and operations guide | Follow documented setup and acceptance flow |
+| G18 | Credit borrowed solutions/templates/generators | No application/scaffold copied; dependencies documented | README provenance and manifests/lockfiles |
 
-Обозначения источников: О — «Требования», страница 1; С — «Что мы ожидаем от вас», страницы 1–2. Разрешения и предпочтения сохранены как таковые, а не превращены в дополнительные обязательные функции.
+## Mandatory assignment9 requirements
 
-| ID | Источник / требование | Способ реализации / целевой интерфейс | Критерий и способ проверки |
-|---|---|---|---|
-| G01 | О.1: отдельные backend и frontend, взаимодействие по сети | FastAPI JSON API и React SPA в отдельных контейнерах; HTTP и SSE | Открыть UI, выполнить регистрацию; в Network виден запрос к API; frontend и backend собираются независимо |
-| G02 | О.2: обосновать язык, библиотеки и инструменты; Python/Go/Node.js предпочтительны | Python + FastAPI; причины выбора в DECISIONS.md и итоговом README | Ревью документации и фактических зависимостей; не выдавать предпочтение PDF за запрет других языков |
-| G03 | О.3: React или Vue | React + TypeScript | Frontend собирается, основные сценарии доступны через браузер |
-| G04 | О.4: реляционная СУБД, предпочтительно PostgreSQL | PostgreSQL, SQLAlchemy, миграции Alembic | Развернуть чистую БД миграциями, выполнить сценарии, перезапустить контейнеры и проверить данные |
-| G05 | О.5: вход и учётные записи на усмотрение исполнителя | Без учётных записей участников; предлагается общий ключ организатора и секретная ссылка управления регистрацией | Документирован выбранный доступ; приватные операции без ключа/токена отклоняются; регистрация по email не требует аккаунта |
-| G06 | О.6 и С.3: промпты, журнал решений или экспорт вместе с кодом | DECISIONS.md и DEVELOPMENT_LOG.md в репозитории; экспорт не обязателен | Журналы содержат реальные решения, причины, действия и время; входят в сдачу |
-| G07 | О.7: ожидается использование AI, не скрывать его | Честно описать участие агента, границы автоматизации и человеческое согласование | Итоговое описание соответствует журналу, не приписывает человеку работу агента |
-| G08 | О.8: описать предварительные требования развёртывания | README: Docker Engine/Desktop, Compose v2, Git, порты, .env, ресурсы и загрузка образов | Пройти инструкцию в чистом окружении; зависимости и настройки не приходится угадывать |
-| G09 | О.9: быстрый локальный запуск | Docker Compose, healthchecks, одноразовый сервис миграций, постоянные volumes | После настройки .env команда `docker compose up --build` поднимает работающее окружение без ручного SQL; зафиксировать фактическое время первого запуска |
-| G10 | О.10: внешние сервисы разрешено эмулировать | Локальный Mailpit вместо настоящей доставки почты | Письма видны в Mailpit; облачные аккаунты не требуются. Это разрешение PDF, обязательность локальной почты задана пользователем |
-| G11 | О.11: работа двух одновременных клиентов | БД управляет конкуренцией; статистика поступает через SSE | Два браузерных контекста: регистрация, отмена, чекин; состояние согласовано без обновления страницы |
-| G12 | О.12 и С.5: честное состояние проекта | README с разделами «Работает», «Ограничения», «Не сделано и почему» | Сверить каждое утверждение с запуском и результатами тестов; не называть проект готовым при невыполненных обязательных требованиях |
-| G13 | О.13: доказуемость работоспособности | Pytest на PostgreSQL, браузерные сценарии и воспроизводимая демонстрация | Сохранить команды и реальные результаты; гонки проверять конкурентными соединениями, письма — по содержимому Mailpit |
-| G14 | С.1: ссылка на GitHub с проектом | После согласования и реализации опубликовать репозиторий и указать ссылку | По ссылке доступен код; свежий clone запускается по инструкции |
-| G15 | С.2: модель, инструмент, причины выбора в паре предложений | Итоговый раздел README; исходные сведения в DECISIONS.md | Назвать фактически использованные модель и инструмент; неподтверждённый точный идентификатор уточнить, не придумывать |
-| G16 | С.4: постепенный ход работы и реальные временные метки от начала до конца | Журнал текущих действий в Asia/Almaty; после разрешения — содержательные Git-коммиты | Время ISO 8601 с `+05:00`; реальные этапы, без задним числом созданной истории; история коммитов проверяется отдельно |
-| G17 | С.6: описание следующего захода | Итоговый список улучшений с приоритетами и причинами | Обязательные недоделки явно обозначены как недоделки, а не спрятаны в необязательные улучшения |
-| G18 | С.7: указать чужие решения, шаблоны, генераторы, если использованы | Вести список заимствований/генераторов и ссылок; отдельно отметить генерацию агентом | Проверка происхождения основы проекта и используемых шаблонов; при отсутствии написать об этом прямо |
+| ID | Requirement | Implementation | Verification |
+| --- | --- | --- | --- |
+| C01 | Event description, date/time and capacity | events model and organizer form/API | API validation, saved values and E2E creation |
+| C02 | Register by email | Canonical email registration service/API/form | ASCII/IDN, repeated email and real HTTP tests |
+| C03 | Cancel participation | Token-authorized cancellation, ticket invalidation | API/private UI, stale/foreign token and time checks |
+| C04 | Waitlist when full | Status and locked MAX+1 active sequence | PostgreSQL business/FIFO tests and independent clients |
+| C05 | Ticket with code | Random code only for confirmed participation | Ticket page/email and invalidated-code checks |
+| C06 | Entrance check-in screen; scanner may be replaced by code entry | Organizer code input and check-in API | Actual browser and two separate staff/API processes |
+| C07 | Organizer confirmed/waiting/arrived counts | One MVCC aggregate snapshot and three UI counters | Counts after registration/cancellation/promotion/check-in |
+| C08 | Registered participant receives a ticket email | Atomic outbox on place allocation | Core -> HTTP -> Notifications -> SMTP -> Mailpit; no mail after business rollback |
+| C09 | Repeating an email does not create a second place | Canonical email, UNIQUE(event_id,email), neutral public no-op | Sequential/concurrent repeats retain one registration/place/token/ticket/outbox; email alone cannot resume |
+| C10 | Cancellation automatically promotes the first waiting person and emails them | Promotion/ticket/outbox in the same cancellation transaction | FIFO order, rollback and real Mailpit promotion email |
+| C11 | Simultaneous last-place requests yield one place and one waiter | READ COMMITTED + event FOR UPDATE + fresh reads | Separate connections and two API processes; confirmed1/waiting1 |
+| C12 | All participants receive a reminder24hours before, exactly one logical reminder | One dedup identity per registration; confirmed/waitlisted, not cancelled | Exact time boundaries, late joins, rescheduling, restart and dedup tests |
+| C13 | Exactly one logical reminder | Unique reminder identity, immutable payload/MIME, stable Message-ID | Commit/ACK/SMTP failure and restart tests; Mailpit duplicate suppression is limited to its current store, not general exactly-once SMTP |
+| C14 | A ticket checks in only once | Conditional update and event synchronization | Concurrent200/409, unchanged timestamp/count on second attempt |
+| C15 | Organizer's arrived count updates live | Shared SSE snapshots, fresh reconnect and server time | Two browsers/processes, check-in update, transient SQL error and cleanup |
+| C16 | All active participants are emailed after rescheduling | Versioned event update and separate deduplicated rescheduling jobs | Repeated/stale/concurrent moves and Mailpit for confirmed/waitlisted recipients |
 
-## Обязательные требования кейса №9
+The PDF's “exactly one reminder” is implemented as one logical notification identity, not an impossible promise of exactly-once SMTP acceptance after an ambiguous network failure. Mailpit's current-store deduplication is a local verification aid.
 
-Все строки ниже происходят из страницы 9. Д — «Должен включать», П — «Ожидаемое поведение»; составные пункты разложены на проверяемые части.
+## Additional user/project requirements
 
-| ID | Источник / требование | Способ реализации / целевой интерфейс | Критерий и способ проверки |
-|---|---|---|---|
-| C01 | Введение, Д.1: организатор создаёт событие с описанием, датой/временем и лимитом | Форма организатора, API, таблица events; дата со смещением, положительный целочисленный лимит | Созданное событие отображается участнику; данные сохраняются; невалидные значения отклоняются API и объясняются UI |
-| C02 | Д.2: регистрация по email | Форма, серверная валидация и нормализация, запись registrations; нейтральный HTTP-ответ без секретов, управление по ссылке первого письма | Свободное место даёт статус confirmed, видимый после перехода по ссылке; ошибочный email не создаёт запись |
-| C03 | Д.2: отказ от участия | Операция cancel по секретному токену и expected_participation_no; транзакция отмены | После отказа статус cancelled; билет недействителен; повторный отказ не освобождает место повторно; отказ из ожидания не освобождает занятое место; старый запрос не отменяет новый цикл участия |
-| C04 | Д.3, П.2: при отсутствии мест — лист ожидания | Статус waitlisted, MAX(waitlist_seq)+1 под event-lock; номер больше всех действующих ожидающих, после очистки хвоста допускается повторное использование | При capacity=N регистрации N+1 и далее оказываются в очереди, без действующего билета |
-| C05 | Д.4: билет с кодом | Случайный уникальный код только у confirmed; билет в UI и email | Код относится к событию и регистрации; код из другого события или отменённый код не принимается |
-| C06 | Д.4: экран чекина; ручной ввод разрешён | Экран организатора с вводом кода и понятным результатом | Действительный код можно ввести вручную; неверный, отменённый и уже использованный различаются в ответах |
-| C07 | Д.5: число зарегистрированных, ожидающих и пришедших | Согласованный SQL-снимок трёх агрегатов | Для набора confirmed=3, waitlisted=2, checked-in=1 UI показывает 3/2/1; пришедшие входят в confirmed, а не прибавляются к нему |
-| C08 | П.1: зарегистрировавшийся получает email с билетом | Outbox создаётся в транзакции назначения места; Core relay → Notifications inbox/MIME → SMTP sender → Mailpit | В Mailpit одно письмо с правильными email, событием, временем и кодом; при rollback письма нет; ожидающему билет не выдаётся |
-| C09 | П.1: повторный email не создаёт второго места | UNIQUE(event_id, email); публичный повтор для любого существующего статуса — без изменения состояния, токена и outbox | Последовательные и конкурентные повторы, включая варианты регистра/пробелов: одна запись и одно занятое место, без второго билета/задания отправки. Cancelled не восстанавливается по email |
-| C10 | П.2: после отказа первый ожидающий автоматически получает место и письмо | Под блокировкой события отменить confirmed и повысить минимальный waitlist_seq в той же транзакции | A/B/C в очереди: отказ повышает A, следующий — B; новый D не обходит очередь; письмо с билетом получает каждый повышенный ровно по своему назначению |
-| C11 | П.3: два человека одновременно на последнее место | READ COMMITTED + SELECT FOR UPDATE строки события; пересчёт мест после захвата блокировки | При одном месте и двух конкурентных независимых запросах: один confirmed, один waitlisted, оба запроса успешны; ни одного переполнения |
-| C12 | П.4: напоминание всем участникам за сутки | Задание создаётся бизнес-транзакцией с available_at=starts_at−24h; один Core relay читает сохранённое расписание, Notifications sender отправляет MIME | Управляемое время: до срока писем нет; на сроке каждый получатель имеет напоминание; целевой предел — 5 секунд для небольшого локального набора без backlog при исправных DB/SMTP |
-| C13 | П.4: напоминание ровно одно | Уникальный reminder:registration; Core prepared_at фиксирует payload, Notifications фиксирует MIME/Message-ID из outbox.id. Mailpit подавляет дубли только пока ID есть в его store; общей exactly-once SMTP нет | Повторное чтение due-заданий, рестарт worker и сбой после принятия SMTP до sent: в Mailpit ровно одно напоминание на регистрацию; условия гарантии — ARCHITECTURE.md §7 |
-| C14 | П.5: билет проходит чекин один раз | Условный UPDATE checked_in_at IS NULL и транзакция под блокировкой события | Два конкурентных чекина: один успех, один «уже отмечен»; timestamp сохраняется, число пришедших увеличивается на 1 |
-| C15 | П.5: счётчик пришедших обновляется live | SSE со свежими снимками статистики и восстановлением после разрыва | Чекин в клиенте A виден у организатора B без reload; предлагаемый измеримый предел — 2 секунды в локальном здоровом окружении; после reconnect виден актуальный итог |
-| C16 | П.6: перенос события вызывает письма всем участникам | Обновление starts_at, schedule_version и outbox на всех активных участников атомарно | Перенос создаёт каждому получателю письмо со старым и новым временем; повтор того же изменения не создаёт новую рассылку; отказавшимся не отправлять новые уведомления |
+These are not additional text discovered in the PDF.
 
-## Обязательные указания пользователя
+| ID | Choice | Implementation / verification |
+| --- | --- | --- |
+| U01 | FastAPI, PostgreSQL, SQLAlchemy, Alembic, React, TypeScript, Compose and Pytest | Manifests/locks, actual containers and tests |
+| U02 | No paid accounts/external runtime APIs; Mailpit | All runtime dependencies local; initial package/image download needs internet |
+| U03 | SOLID/KISS/DRY/YAGNI where useful | Small responsibilities, no speculative repositories/interfaces/broker; readable tested transactions |
+| U04 | Real Git commit progression | Existing history; this task creates no commit/push or invented dates |
+| U05 | Separate ten-sentence essay | ESSAY.md, based on recorded experience; manually count10 sentences |
+| U06 | Staged work and user architecture approval | Implement only authorized changes; preserve prior work/data |
+| U07 | Real Almaty timestamps | Clock observations converted to Asia/Almaty +05; no reconstruction of unknown earlier times |
+| U08 | One relay/sender, transactional outbox, no distributed leases | PostgreSQL session singleton, no SQL transaction during network, crash/ownership tests |
+| U09 | Never recover a management secret merely from email | Public duplicates are no-op for every state; resume needs token/generation |
+| U10 | Compare queue/transport/isolation alternatives; permit later growth without adding speculative systems | Decision history and architecture; Core/Notifications HTTP split later explicitly approved |
+| U11 | Three Core tables/24columns, canonical email, locked MAX+1 and new migrations only | Real information_schema and populated migration tests; no users table, old revisions intact |
 
-| ID | Требование | Способ реализации / целевой интерфейс | Проверка |
-|---|---|---|---|
-| U01 | Предпочтительный стек: Python/FastAPI, PostgreSQL/SQLAlchemy/Alembic, React/TypeScript, Docker Compose, Pytest | Использовать этот стек; версии закрепить при реализации | Проверить manifests, lockfiles, Compose, миграции и команду тестов |
-| U02 | Без платных аккаунтов и внешних API; Mailpit подтверждён пользователем | Все runtime-сервисы локальные; SMTP и приёмочный API Mailpit внутри окружения; внешнюю пересылку выключить | После сборки/загрузки зависимостей отключить интернет и пройти демонстрацию; первоначальная загрузка образов/пакетов и публикация GitHub требуют сети |
-| U03 | Минимальная надёжная архитектура, корректность, читаемость, тестируемость; SOLID/KISS/DRY по необходимости | Модульный backend, единые сервисы бизнес-операций, три таблицы; без Redis/Celery, универсальных репозиториев и лишних интерфейсов | Ревью границ ответственности, дублирования, сложности; бизнес-правила проверяются без браузера |
-| U04 | К сдаче история Git-коммитов | После согласования делать реальные коммиты по завершённым этапам | git log показывает развитие проекта; не переписывать даты и не создавать фиктивную историю |
-| U05 | Отдельное эссе из 10 предложений | Создать ESSAY.md на финальном этапе по фактическому опыту | Ручной подсчёт: ровно 10 предложений; отдельный файл; содержание согласуется с журналом. Тема отдельно не задана: предлагается опыт выполнения с AI |
-| U06 | Работа по этапам; архитектуру принимает пользователь; до согласования нет функциональности и коммитов | Архитектура принята; инфраструктура и упрощение схемы разрешены отдельными сообщениями. Коммит — только по явному разрешению | Diff соответствует разрешённому этапу; после отчёта остановиться, без commit/push и самовольного перехода к следующему этапу |
-| U07 | Реальные временные метки Алматы, без выдуманной истории | DEVELOPMENT_LOG.md фиксирует наблюдения по часам; DECISIONS.md — время записи решений | Часовой пояс Asia/Almaty, `+05:00`; время прошлого обсуждения не восстанавливается предположительно |
-| U08 | Упрощение от 2026-10-20: один background worker и transactional outbox без многопроцессной координации, с сохранением бизнес-гарантий | По актуальному уточнению — один HTTP relay Core и один SMTP sender Notifications; нет leases/распределённой обработки. Core prepared_at и Notifications MIME — отдельные границы; event-lock остаётся в Core | Один отправитель и последовательный restart; тесты commit/SMTP/crash/retry; FIFO работает при выключенном worker; отсутствие leases в новой схеме |
-| U09 | Не выдавать секретный токен повторно по одному email | Публичный endpoint для существующей записи всегда no-op; resume отдельной операцией по действующему токену и номеру участия; токен не ротируется; первый токен только в письме | Ни active, ни cancelled email-запрос не выдаёт/меняет токен или участие; чужой токен/старый номер отклоняется; параллельный resume меняет состояние один раз |
-| U10 | Сравнить outbox/Celery/микросервисы, SSE/WebSocket и уровни изоляции; предусмотреть расширение без внедрения | ARCHITECTURE.md §5/8/12/13/14; явные ограничения, причины и путь будущей миграции | Ревью сравнений, таблицы компромиссов и тест-плана; runtime не включает Redis/Celery/брокер. Позднее пользователь согласовал Core + Notifications по HTTP — это актуальное дополнительное решение, исходное ограничение на микросервисы заменено |
-| U11 | Указание 2026-10-21: три таблицы, 24 поля, без users; email сразу нормализован, MAX очереди под event-lock; новая миграция | ARCHITECTURE.md §4–5; модели 5+9+10, сохранены participation_no/schedule_version/prepared_at/dedup_key | Запрос information_schema, тест миграции с данными, уникальность email, два соединения и проверка ожидания lock; бизнес-сценарии проверены PostgreSQL/API-тестами; наличие ограничений БД само по себе не заменяет эти проверки |
+## Agreed interpretations where the PDF is not specific
 
-## Проектные уточнения и трактовки
+| ID | Rule | Verification |
+| --- | --- | --- |
+| A01 | Active participants means confirmed and waitlisted; cancelled excluded | Recipient selection and wording, no ticket for waiting |
+| A02 | One logical reminder across resume/rescheduling; unprepared can change, prepared immutable | Before/after-freeze changes and send retries |
+| A03 | Late unprepared reminders may run before start, are suppressed after start; prepared retries remain historical | −24h/start boundaries, outage/restart and frozen retry |
+| A04 | Resume retains registration/token, increments participation_no, uses new ticket or queue tail | Stale actions/old ticket rejected, no restored queue priority |
+| A05 | Lowercase email with email-validator ASCII domain, no SMTPUTF8; preserve dots/+suffixes | IDNA ß/Punycode/concurrent duplicate and ASCII tests |
+| A06 | Registration/cancel/resume/reschedule before start; check-in from start; checked-in cannot cancel | Time after event-lock, concurrent cancel/check-in, device-clock E2E |
+| A07 | Capacity cannot be edited after creation | API rejects unspecified mutation, UI offers date change only |
+| A08 | No accounts; organizer secret and participant capability links | No public secret exposure/storage, unauthorized actions rejected |
+| A09 | Live updates use one-second snapshots per event/process; small healthy queues should be prompt | Observed latency/E2E, not an invented PDF timing or production SLA |
 
-| ID | Неоднозначность / предлагаемый контракт | Проверка после принятия |
-|---|---|---|
-| A01 | «Все участники» для напоминания и переноса: confirmed и waitlisted; ожидающему явно написать, что место ещё не выделено. Cancelled исключены | Проверить получателей и текст отдельно для каждого статуса |
-| A02 | Одно напоминание за всю жизнь регистрации, даже после переноса/resume. До prepared_at меняются срок и данные; после него письмо неизменно, новую дату сообщает отдельное rescheduled | Перенос до/после подготовки и отправки; повторное чтение заданий не создаёт второе логическое напоминание |
-| A03 | При поздней регистрации/переносе и после простоя ещё не подготовленное напоминание отправить до начала; после начала отменить. Если попытка уже начата, повторяется прежнее письмо для завершения неопределённого результата SMTP | Границы −24h, starts_at, простой, поздний вход; отдельный тест prepared retry после начала; без обещания доставки задним числом |
-| A04 | Resume после отказа восстанавливает ту же запись с новым participation_no и очередью с хвоста, только по действующему токену. Токен сохраняется; новый билет — при получении места. Публичный email-повтор не восстанавливает участие | Старый билет недействителен; приоритет не восстанавливается; уже отправленное напоминание не дублируется; старые запросы cancel/resume не меняют следующий цикл |
-| A05 | Email: strip/lower + email-validator.ascii_email, ASCII-домен IDNA2008, без SMTPUTF8; Unicode/Punycode — одна идентичность, точки/+суффиксы сохраняются | Разный регистр/пробелы считаются одним адресом, user+tag и user различаются; это продуктовое упрощение, а не универсальное правило email |
-| A06 | До начала разрешены регистрация, отказ и перенос; после начала новые регистрации/отказы/переносы запрещены. Чекин — с момента начала; уже пришедший не может отказаться | Сервер проверяет время после блокировки; UI отражает ограничения; тестировать гонку cancel/check-in |
-| A07 | Лимит после создания не редактируется в минимальном объёме; перенос даты реализуется обязательно | API не допускает незаявленное изменение capacity; UI не предлагает эту операцию |
-| A08 | Нет аккаунтов; общий секрет организатора из .env, участник управляет записью по непредсказуемому токену | Не передавать секрет организатора в публичную сборку; чужой email сам по себе не позволяет отменить участие |
-| A09 | Live: все три счётчика и дата обновляются автоматически, целевой предел 2 секунды; email — 5 секунд для небольшого набора без backlog при исправных DB/SMTP | Два контекста браузера и замер задержки; отдельная проверка очереди при задержках; эти числа — предложения, в PDF их нет |
+## Later approved reliability, UI and scale work
 
-## Что считается готовой сдачей
+- All required screens, SSE and asynchronous SMTP are implemented; user review remains part of handover.
+- Extra server_time on event pages and SSE anchors actions/availability with performance.now. Unknown/offline time stays neutral/disabled; reconnect gets fresh data. Rendering uses English and explicit Almaty timezone.
+- Shared SSE producers, bounded queues, identity-safe retirement after SQL failure and resource cleanup replace per-client SQL polling.
+- Paginated lists, indexes and three-statement atomic rescheduling reduce unbounded work; offset limitations remain explicit.
+- Single-iteration relay/sender mutex, ownership-loss cancellation, safe retry and heartbeat/failed/backlog diagnostics preserve immutable delivery evidence.
+- Nginx resource budgets account for NAT and overwrite untrusted proxy headers; multiple API-process correctness stays in PostgreSQL.
+- CI includes real PostgreSQL/Mailpit, migrations/static/types/builds, HTTP/SMTP failures and browser tests. Corrected load probes reject partial success/invalid snapshots; raw historical measurements are retained with their limitations.
+- Original PDF/data, tests, migrations, locks, SQL bootstrap and measurement artifacts are preserved. Translation does not rewrite already prepared payload/MIME. English history is an editorial translation of recorded actions, not fabricated new timestamps.
 
-Для готовой сдачи все G/C/U требования должны иметь подтверждение: работающий GitHub-проект, запуск с чистой БД по README, история коммитов, журналы с реальным временем, описание модели/инструмента и выбора, честное состояние и улучшения, ESSAY.md из 10 предложений. Для гонок C09–C11/C14 нужны тесты на настоящем PostgreSQL; для C08/C12/C13/C16 — наблюдаемые письма в Mailpit; для C15 — два браузерных клиента. Согласование проектных уточнений не заменяет выполнение обязательных требований.
-
-## Подтверждения реализации и открытые критерии на 2026-10-23
-
-| Область PDF | Реализация и доказательство | Что ещё не принято |
-|---|---|---|
-| C01–C04, C09–C11 | services/API, реальная PostgreSQL: test_api, test_business, test_waitlist; test_api_processes — два отдельных API-процесса, подтверждённое ожидание event-lock; FIFO-продвижение и outbox в одном commit | Формы реализованы и проверены E2E; очередь показана статусом без выдуманного номера позиции; требуется пользовательское ревью |
-| C05/C06/C14 | Случайный билет, инвалидирование при отмене, conditional UPDATE чекина; HTTP200/409 при двух API-процессах, timestamp/счётчик не меняются повторно | Экран билета/ручного чекина реализован; E2E два одновременных чекина, только один успех |
-| C07 | Три согласованных агрегата одним SQL-снимком; экран организатора и SSE без reload, API/SSE/E2E тесты | Пользовательское ревью |
-| C08/C12/C13/C16 | Core relay + Notifications + реальный test-mailpit: test_email_delivery, test_sender, test_smtp. До/после freeze, 24h, повторные переносы/отмена/resume, backoff/restart/lost ACK; SMTP accept отличается от HTTP202 | Пользовательский путь из реального Mailpit проверен E2E, включая фактический origin ссылки; SMTP exactly-once вне оговорённых условий не гарантируется |
-| C15, G11 | Два независимых API-процесса + несколько браузерных контекстов: SSE-счётчики после чекина, offline/reconnect, актуальный initial snapshot и cleanup | Пользовательская приёмка; автоматический браузерный прогон — Chrome |
-| G01/G03 | Реальные React экраны/формы/API/SSE, отдельные сборки/прокси; мобильные/десктопные screenshots и E2E | Расширенное кросс-браузерное/a11y тестирование по необходимости |
-| G04/G08/G09/G13 | Миграции обеих БД, непривилегированные роли/изоляция/repeated bootstrap, чистый Compose startup и fault scripts CI | Финальный запуск из свежего clone по README; измерение развёртывания на машине приёмки |
-| G02/G05–G07/G12/G15–G18 | Архитектура, выбранный доступ, AI/происхождение, журналы действий/решений и ограничения описаны | Сверить точную модель из настройки сессии перед сдачей; финальный журнал/описание улучшений |
-| G14 и указания пользователя | Git-история существует, новых commit/push на этом этапе нет | Ссылка/доступность GitHub и история актуальных изменений после разрешения; отдельное ESSAY.md из 10 предложений |
-
-Дополнительные решения пользователя/проекта, **не буквальные требования PDF**: Core + Notifications с разными БД/ролями, Mailpit, async стек, SSE как транспорт live, общий organizer key, management token, resume/participation_no, schedule_version, версии JSON/идемпотентный inbox, IDNA policy, один reminder за всю жизнь регистрации. PDF требует результат регистрации/FIFO/почты/live, но не диктует эти технологии/поля/детали. Сроки 2s/5s — целевые локальные ориентиры, а не SLA PDF; двойной poll/backlog могут увеличить задержку email.
-
-Публичная регистрация после начала: одинаковый нейтральный 202 для нового и существующего корректного email без создания участия/outbox; остальные новые запрещённые временные переходы — 409. После фиксации Core payload письмо считается историческим: отмена/перенос не отзывают его в Notifications, новые переносы имеют отдельные сообщения. До freeze Core проверяет актуальность под event-lock. Это согласованные ограничения, а не обещание мгновенного отзыва SMTP.
-
-Email/секреты проверяются регрессиями: faß ≠ fass; Unicode/Punycode/регистр совпадают; точки/+tag сохранены; unsafe legacy MIME → failed без SMTP, следующий job отправляется. Settings repr/ValidationError и реальные stderr API/worker/CLI/Alembic не раскрывают fake secrets; структурированные inputs не логируются. Полные фактические команды/результаты и проверка отрицательными контролями — [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md).
-
-Frontend/SSE — дополнительный реализованный этап, не изменение бизнес-правил: публичный stream без секретов, существующие Bearer-ключи только в памяти; состояния загрузки/ошибки/empty/404/invalid link, блокировка повторного запроса, HTTP409 refresh, явный Алматы UTC+5. Транспорт SSE и визуальная афиша выбраны проектом, PDF требует live-результат и работу двух клиентов. E2E не использует имитации успешных бизнес-операций; route.abort/context offline применяются только для испытания отказов.
-
-
-## Уточнения этапа2026-10-24 (дополнительные решения, не новые требования PDF)
-
-Пять действий UI используют серверное время; неизвестное время/потеря SSE/возврат/граница начала проверяются browser clock regressions. Shared SSE hub/пагинация/ограничения ingress/индексная0005/массовый SQL перенос/принудительная сериализация sender/relay/heartbeat и operator retry усиливают производительность и надёжность, не меняя обязательные FIFO/места/чекин/почту. List API теперь {items,next_offset,server_time}; Availability использует только серверное время, при неизвестном времени показывает нейтральный статус. Private-only изменение без изменения агрегатов имеет fallback10s, счётчики по-прежнему обновляются live. Immutable payload/MIME и SMTP ambiguity сохраняются. Playwright включён в CI; локальный прогон не объявляется удалённым запуском GitHub Actions. Фактические подтверждения/границы — DEVELOPMENT_LOG, OPERATIONS и LOAD_TESTING.
+Submission requires an actual GitHub project, reproducible setup, approved history/changes, real verification, provenance, limits and the user-requested essay. Passing constraints or agreeing an architecture does not replace those checks; an unpushed working copy is not yet the submitted GitHub revision.

@@ -21,7 +21,7 @@ export function useEvents() {
       .then((page) => {
         if (controller.signal.aborted) return;
         const epoch = Date.parse(page.server_time);
-        if (!Number.isFinite(epoch)) throw new Error('Не удалось уточнить время сервера.');
+        if (!Number.isFinite(epoch)) throw new Error('Could not verify server time.');
         anchor = { epoch, received: performance.now() };
         setServerNow(epoch);
         setData(page.items);
@@ -205,13 +205,13 @@ export function useAction<A, R>(operation: (args: A) => Promise<R>) {
       return mounted.current ? result : undefined;
     } catch (reason) {
       if (mounted.current)
-        setError(reason instanceof Error ? reason : new Error('Не удалось выполнить действие.'));
+        setError(reason instanceof Error ? reason : new Error('Could not complete the action.'));
     } finally {
       locked.current = false;
       if (mounted.current) setBusy(false);
     }
   }
-  return { run, busy, error, clear: () => setError(null) };
+  return { run, busy, error };
 }
 export const useRegister = (id: string) => useAction((email: string) => api.register(id, email));
 export const useLogin = () => useAction((key: string) => api.verify(key));
@@ -282,7 +282,7 @@ export function useParticipation(token: string) {
       const value = await api.change(kind, token, data.participation_no);
       if (mounted.current) {
         setData(value);
-        setNotice(kind === 'cancel' ? 'Участие отменено.' : 'Участие восстановлено.');
+        setNotice(kind === 'cancel' ? 'Participation cancelled.' : 'Participation restored.');
       }
     } catch (reason) {
       if (mounted.current) {

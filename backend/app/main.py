@@ -34,7 +34,7 @@ def create_app(settings: Settings | None = None, clock: Clock = utc_now) -> Fast
             await engine.dispose()
 
     app = FastAPI(
-        title="Регистрация на мероприятия",
+        title="Event registration",
         version="0.1.0",
         lifespan=lifespan,
         docs_url=None,

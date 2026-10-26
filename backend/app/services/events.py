@@ -25,10 +25,10 @@ async def create_event(
 ) -> EventView:
     starts_at = as_utc(starts_at)
     if not description.strip() or "\x00" in description or not 0 < capacity <= 2_147_483_647:
-        raise InvalidInput("invalid_event", "Нужны описание и положительный лимит мест")
+        raise InvalidInput("invalid_event", "A description and positive capacity are required")
     async with session.begin():
         if starts_at <= as_utc(clock()):
-            raise Conflict("invalid_start_time", "Дата мероприятия должна быть в будущем")
+            raise Conflict("invalid_start_time", "The event date must be in the future")
         event = Event(description=description.strip(), starts_at=starts_at, capacity=capacity)
         session.add(event)
         await session.flush()
@@ -59,10 +59,10 @@ async def reschedule_event(
         if starts_at == event.starts_at:
             return await event_view(session, event_id)
         if expected_schedule_version != event.schedule_version:
-            raise Conflict("schedule_version_conflict", "Дата уже изменена; обновите мероприятие")
+            raise Conflict("schedule_version_conflict", "The date changed; refresh the event")
         require_before_start(event, now)
         if starts_at <= now:
-            raise Conflict("invalid_start_time", "Новая дата должна быть в будущем")
+            raise Conflict("invalid_start_time", "The new date must be in the future")
         old_starts_at = event.starts_at
         event.starts_at = starts_at
         event.schedule_version += 1

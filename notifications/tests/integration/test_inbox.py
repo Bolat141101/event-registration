@@ -39,7 +39,7 @@ def document(identities: list[UUID]) -> dict[str, Any]:
         "payload": {
             "recipient": "user@example.test",
             "event_id": str(uuid4()),
-            "description": "Событие",
+            "description": "Event",
             "starts_at": "2030-01-03T12:00:00Z",
             "schedule_version": 1,
             "participation_no": 1,
@@ -155,7 +155,7 @@ async def test_concurrent_different_content_is_conflict(
     client: httpx.AsyncClient, document: dict[str, Any], integration_engine: AsyncEngine
 ) -> None:
     changed = deepcopy(document)
-    changed["payload"]["description"] = "Другое событие"
+    changed["payload"]["description"] = "Another event"
     responses = await asyncio.gather(
         client.post(PATH, json=document, headers=HEADERS),
         client.post(PATH, json=changed, headers=HEADERS),

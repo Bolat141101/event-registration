@@ -7,6 +7,7 @@ export default defineConfig({
   expect: { timeout: 12000 },
   reporter: 'list',
   use: {
+    locale: 'en-GB',
     baseURL: process.env.E2E_BASE_URL,
     viewport: { width: 1280, height: 900 },
     trace: 'off',

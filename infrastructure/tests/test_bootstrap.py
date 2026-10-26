@@ -220,7 +220,7 @@ async def seed(
         await connection.execute(
             text(
                 "INSERT INTO events (id, description, starts_at, capacity, schedule_version) "
-                "VALUES (:id, 'Bootstrap regression — сохранность', :now, 1, 3)"
+                "VALUES (:id, 'Bootstrap regression — data preservation', :now, 1, 3)"
             ),
             {"id": event_id, "now": now},
         )
